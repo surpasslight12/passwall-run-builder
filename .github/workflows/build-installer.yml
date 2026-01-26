@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libncurses5-dev gawk gettext unzip file \
-            libssl-dev wget python3 git ca-certificates makeself
+            libssl-dev wget python3 git ca-certificates makeself zstd
 
       - name: Build PassWall IPK with OpenWrt SDK
         run: |
@@ -40,8 +40,20 @@ jobs:
           mkdir -p openwrt-sdk
           cd openwrt-sdk
           echo "Downloading OpenWrt SDK from: $OPENWRT_SDK_URL"
-          wget "$OPENWRT_SDK_URL" -O sdk.tar.xz
-          tar xf sdk.tar.xz --strip-components=1
+          
+          # Determine file extension from URL
+          SDK_FILE=$(basename "$OPENWRT_SDK_URL")
+          wget "$OPENWRT_SDK_URL" -O "$SDK_FILE"
+          
+          # Extract based on file extension
+          if [[ "$SDK_FILE" == *.tar.zst ]]; then
+            tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1
+          elif [[ "$SDK_FILE" == *.tar.xz ]]; then
+            tar xf "$SDK_FILE" --strip-components=1
+          else
+            echo "Unsupported SDK archive format: $SDK_FILE" >&2
+            exit 1
+          fi
 
           ./scripts/feeds update -a
           ./scripts/feeds install -a
