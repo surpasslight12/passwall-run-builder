@@ -55,6 +55,13 @@ jobs:
             exit 1
           fi
 
+          # Initialize feeds configuration from default
+          if [ -f feeds.conf.default ]; then
+            cp feeds.conf.default feeds.conf
+          else
+            echo "Warning: feeds.conf.default not found, feeds may not initialize correctly" >&2
+          fi
+
           # Update only the feeds we need (exclude telephony to avoid package collection errors)
           ./scripts/feeds update packages luci routing base
           ./scripts/feeds install -a -p packages
