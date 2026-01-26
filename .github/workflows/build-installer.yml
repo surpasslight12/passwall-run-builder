@@ -65,11 +65,11 @@ jobs:
           # This works regardless of architecture or feed directory structure
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
-          
+
           # Copy all other IPK files (dependencies) to depends directory
           # Exclude luci-app-passwall and luci-i18n packages which are already copied
           find bin/packages -type f -name "*.ipk" ! -name "luci-app-passwall*" ! -name "luci-i18n*" -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
-          
+
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
           echo "Dependencies copied:"
