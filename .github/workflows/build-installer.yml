@@ -55,8 +55,12 @@ jobs:
             exit 1
           fi
 
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          # Update only the feeds we need (exclude telephony to avoid package collection errors)
+          ./scripts/feeds update packages luci routing base
+          ./scripts/feeds install -a -p packages
+          ./scripts/feeds install -a -p luci
+          ./scripts/feeds install -a -p routing
+          ./scripts/feeds install -a -p base
 
           rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
