@@ -58,17 +58,22 @@ jobs:
           make defconfig
           make package/luci-app-passwall/compile -j"$(nproc)"
 
-          SDK_LUCI_DIR=$(find bin/packages -maxdepth 3 -type d -name 'passwall-luci' | head -n1)
-          SDK_DEPS_DIR=$(find bin/packages -maxdepth 3 -type d -name 'passwall-packages' | head -n1)
-
-          echo "SDK_LUCI_DIR=${SDK_LUCI_DIR}"
-          echo "SDK_DEPS_DIR=${SDK_DEPS_DIR}"
-
+          # Create target directories
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
 
-          cp "${SDK_LUCI_DIR}"/luci-app-passwall_*.ipk "$GITHUB_WORKSPACE/payload/"
-          cp "${SDK_LUCI_DIR}"/luci-i18n-passwall-zh-cn_*.ipk "$GITHUB_WORKSPACE/payload/"
-          cp "${SDK_DEPS_DIR}"/*.ipk "$GITHUB_WORKSPACE/payload/depends/"
+          # Copy compiled packages directly from bin/packages
+          # This works regardless of architecture or feed directory structure
+          find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
+          find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
+          
+          # Copy all other IPK files (dependencies) to depends directory
+          # Exclude luci-app-passwall and luci-i18n packages which are already copied
+          find bin/packages -type f -name "*.ipk" ! -name "luci-app-passwall*" ! -name "luci-i18n*" -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
+          
+          echo "Packages copied successfully:"
+          ls -lh "$GITHUB_WORKSPACE/payload/"
+          echo "Dependencies copied:"
+          ls -lh "$GITHUB_WORKSPACE/payload/depends/" | head -20
 
       - name: Validate payload
         run: |
