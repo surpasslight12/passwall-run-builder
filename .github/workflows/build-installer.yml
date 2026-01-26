@@ -1,0 +1,122 @@
+name: Build PassWall Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-installer:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Load OpenWrt SDK config
+        run: |
+          if [ -f config/openwrt-sdk.conf ]; then
+            echo "Using config/openwrt-sdk.conf as OpenWrt SDK config"
+            # 文件内容为 KEY=VALUE 形式，直接写入 GITHUB_ENV 供后续步骤使用
+            cat config/openwrt-sdk.conf | grep -v '^#' | sed '/^$/d' >> "$GITHUB_ENV"
+          else
+            echo "config/openwrt-sdk.conf not found" >&2
+            exit 1
+          fi
+
+      - name: Install build dependencies and makeself
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential libncurses5-dev gawk gettext unzip file \
+            libssl-dev wget python3 git ca-certificates makeself
+
+      - name: Build PassWall IPK with OpenWrt SDK
+        run: |
+          set -e
+          mkdir -p openwrt-sdk
+          cd openwrt-sdk
+          echo "Downloading OpenWrt SDK from: $OPENWRT_SDK_URL"
+          wget "$OPENWRT_SDK_URL" -O sdk.tar.xz
+          tar xf sdk.tar.xz --strip-components=1
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
+
+          rm -rf feeds/luci/applications/luci-app-passwall
+          git clone https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
+
+          ./scripts/feeds update passwall-luci passwall-packages
+          ./scripts/feeds install luci-app-passwall
+
+          make defconfig
+          make package/luci-app-passwall/compile -j"$(nproc)"
+
+          SDK_LUCI_DIR=$(find bin/packages -maxdepth 3 -type d -name 'passwall-luci' | head -n1)
+          SDK_DEPS_DIR=$(find bin/packages -maxdepth 3 -type d -name 'passwall-packages' | head -n1)
+
+          echo "SDK_LUCI_DIR=${SDK_LUCI_DIR}"
+          echo "SDK_DEPS_DIR=${SDK_DEPS_DIR}"
+
+          mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
+
+          cp "${SDK_LUCI_DIR}"/luci-app-passwall_*.ipk "$GITHUB_WORKSPACE/payload/"
+          cp "${SDK_LUCI_DIR}"/luci-i18n-passwall-zh-cn_*.ipk "$GITHUB_WORKSPACE/payload/"
+          cp "${SDK_DEPS_DIR}"/*.ipk "$GITHUB_WORKSPACE/payload/depends/"
+
+      - name: Validate payload
+        run: |
+          ls -l payload
+          test -f payload/install.sh
+          test -f payload/luci-app-passwall_*.ipk
+          test -f payload/luci-i18n-passwall-zh-cn_*.ipk
+          test -d payload/depends
+
+      - name: Prepare payload
+        run: |
+          mkdir -p build/payload
+          cp -r payload/* build/payload/
+          chmod +x build/payload/install.sh
+
+      - name: Build self-extracting installer
+        run: |
+          cd build
+          PW_FULL=$(ls payload | grep 'luci-app-passwall_' | awk -F'[_]' '{print $3}')
+          PW_VER=${PW_FULL%%-*}
+          RUN_NAME="PassWall_${PW_VER}_x86_64_all_sdk_24.10.run"
+          LABEL="PassWall_${PW_VER}_with_sdk_24.10"
+          echo "RUN_NAME=${RUN_NAME}" >> $GITHUB_ENV
+          echo "LABEL=${LABEL}" >> $GITHUB_ENV
+          makeself --nox11 \
+            payload \
+            "../${RUN_NAME}" \
+            "${LABEL}" \
+            ./install.sh
+
+      - name: Verify installer
+        run: |
+          file "${RUN_NAME}"
+          sh "${RUN_NAME}" --info
+          sh "${RUN_NAME}" --check
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.RUN_NAME }}
+          path: ${{ env.RUN_NAME }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ env.RUN_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
