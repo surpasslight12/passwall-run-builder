@@ -89,14 +89,47 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
 
-          # Copy only PassWall-related dependency IPK files到 depends 目录
-          # 通过路径限制在 passwall-* feed 下，避免把整个 SDK 的所有包都打进安装器
-          # 仍然排除 luci-app-passwall 和 luci-i18n-passwall 本体包（已在上面单独复制到 payload 根目录）
-          find bin/packages -type f \
-            -path '*/passwall-*/*.ipk' \
-            ! -name 'luci-app-passwall*' \
-            ! -name 'luci-i18n-passwall*' \
-            -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
+          # 只拷贝与官方安装包一致的一组依赖 IPK
+          # 精确白名单（使用前缀匹配，允许版本号变化）：
+          #   chinadns-ng, dns2socks, geoview, hysteria, ipt2socks, microsocks, naiveproxy,
+          #   shadow-tls, shadowsocks-libev-ss-*, shadowsocks-rust-ss*, shadowsocksr-libev-ssr-*,
+          #   simple-obfs-client, sing-box, tcping, trojan-plus, tuic-client,
+          #   v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core, xray-plugin
+          find bin/packages -type f \( \
+              -name 'chinadns-ng_*.ipk' \
+           -o -name 'dns2socks_*.ipk' \
+           -o -name 'geoview_*.ipk' \
+           -o -name 'hysteria_*.ipk' \
+           -o -name 'ipt2socks_*.ipk' \
+           -o -name 'microsocks_*.ipk' \
+           -o -name 'naiveproxy_*.ipk' \
+           -o -name 'shadow-tls_*.ipk' \
+           -o -name 'shadowsocks-libev-ss-local_*.ipk' \
+           -o -name 'shadowsocks-libev-ss-redir_*.ipk' \
+           -o -name 'shadowsocks-libev-ss-server_*.ipk' \
+           -o -name 'shadowsocks-rust-sslocal_*.ipk' \
+           -o -name 'shadowsocks-rust-ssserver_*.ipk' \
+           -o -name 'shadowsocksr-libev-ssr-local_*.ipk' \
+           -o -name 'shadowsocksr-libev-ssr-redir_*.ipk' \
+           -o -name 'shadowsocksr-libev-ssr-server_*.ipk' \
+           -o -name 'simple-obfs-client_*.ipk' \
+           -o -name 'sing-box_*.ipk' \
+           -o -name 'tcping_*.ipk' \
+           -o -name 'trojan-plus_*.ipk' \
+           -o -name 'tuic-client_*.ipk' \
+           -o -name 'v2ray-geoip_*.ipk' \
+           -o -name 'v2ray-geosite_*.ipk' \
+           -o -name 'v2ray-plugin_*.ipk' \
+           -o -name 'xray-core_*.ipk' \
+           -o -name 'xray-plugin_*.ipk' \
+          \) -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
+
+          # 如果没有找到任何依赖，直接报错退出，避免生成只有主包没有依赖的安装器
+          DEP_COUNT=$(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.ipk" | wc -l)
+          if [ "$DEP_COUNT" -eq 0 ]; then
+            echo "Error: no dependency IPK files were found and copied into payload/depends" >&2
+            exit 1
+          fi
 
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
@@ -121,7 +154,9 @@ jobs:
       - name: Build self-extracting installer
         run: |
           cd build
-          PW_FULL=$(ls payload | grep 'luci-app-passwall_' | awk -F'[_]' '{print $3}')
+          # 从 luci-app-passwall_*.ipk 文件名中抽取版本号，例如：
+          # luci-app-passwall_26.1.25-r1_all.ipk -> 26.1.25
+          PW_FULL=$(ls payload | grep 'luci-app-passwall_' | head -n1 | awk -F'[_]' '{print $2}')
           PW_VER=${PW_FULL%%-*}
           # 从 OPENWRT_SDK_URL 提取架构与 SDK 版本
           ARCH_SEG=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+/[^/]\+\)/.*#\1#p')
