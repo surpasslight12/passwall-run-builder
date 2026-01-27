@@ -89,9 +89,14 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
 
-          # Copy all other IPK files (dependencies) to depends directory
-          # Exclude luci-app-passwall and luci-i18n-passwall packages which are already copied
-          find bin/packages -type f -name "*.ipk" ! -name "luci-app-passwall*" ! -name "luci-i18n-passwall*" -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
+          # Copy only PassWall-related dependency IPK files到 depends 目录
+          # 通过路径限制在 passwall-* feed 下，避免把整个 SDK 的所有包都打进安装器
+          # 仍然排除 luci-app-passwall 和 luci-i18n-passwall 本体包（已在上面单独复制到 payload 根目录）
+          find bin/packages -type f \
+            -path '*/passwall-*/*.ipk' \
+            ! -name 'luci-app-passwall*' \
+            ! -name 'luci-i18n-passwall*' \
+            -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
 
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
