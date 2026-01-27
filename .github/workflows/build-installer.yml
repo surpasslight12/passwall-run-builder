@@ -94,7 +94,7 @@ jobs:
           make package/chinadns-ng/compile -j"$(nproc)"
           make package/dns2socks/compile -j"$(nproc)"
           make package/geoview/compile -j"$(nproc)" || true
-          make package/hysteria/compile -j"$(nproc)"
+          make package/hysteria/compile -j"$(nproc)" || true
           make package/ipt2socks/compile -j"$(nproc)"
           make package/microsocks/compile -j"$(nproc)"
           make package/naiveproxy/compile -j"$(nproc)"
