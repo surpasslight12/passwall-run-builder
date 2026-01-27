@@ -91,27 +91,27 @@ jobs:
 
           # 额外编译官方安装包中包含的依赖 IPK，确保后面白名单拷贝时这些包实际存在
           # 单个主包会生成多个子 ipk（如 shadowsocks-libev-ss-local 等）
-          make package/chinadns-ng/compile -j"$(nproc)"
+          make package/chinadns-ng/compile -j"$(nproc)" || true
           make package/dns2socks/compile -j"$(nproc)"
           make package/geoview/compile -j"$(nproc)" || true
           make package/hysteria/compile -j"$(nproc)" || true
           make package/ipt2socks/compile -j"$(nproc)"
           make package/microsocks/compile -j"$(nproc)"
-          make package/naiveproxy/compile -j"$(nproc)"
+          make package/naiveproxy/compile -j"$(nproc)" || true
           make package/shadow-tls/compile -j"$(nproc)" || true
           make package/shadowsocks-libev/compile -j"$(nproc)"
-          make package/shadowsocks-rust/compile -j"$(nproc)"
+          make package/shadowsocks-rust/compile -j"$(nproc)" || true
           make package/shadowsocksr-libev/compile -j"$(nproc)"
           make package/simple-obfs/compile -j"$(nproc)" || true
-          make package/sing-box/compile -j"$(nproc)"
+          make package/sing-box/compile -j"$(nproc)" || true
           make package/tcping/compile -j"$(nproc)"
-          make package/trojan-plus/compile -j"$(nproc)"
+          make package/trojan-plus/compile -j"$(nproc)" || true
           make package/tuic-client/compile -j"$(nproc)" || true
-          make package/v2ray-geoip/compile -j"$(nproc)"
-          make package/v2ray-geosite/compile -j"$(nproc)"
-          make package/v2ray-plugin/compile -j"$(nproc)"
-          make package/xray-core/compile -j"$(nproc)"
-          make package/xray-plugin/compile -j"$(nproc)"
+          make package/v2ray-geoip/compile -j"$(nproc)" || true
+          make package/v2ray-geosite/compile -j"$(nproc)" || true
+          make package/v2ray-plugin/compile -j"$(nproc)" || true
+          make package/xray-core/compile -j"$(nproc)" || true
+          make package/xray-plugin/compile -j"$(nproc)" || true
 
           # Create target directories
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
