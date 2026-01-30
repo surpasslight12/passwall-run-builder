@@ -90,7 +90,8 @@ jobs:
           # Install required build host tools and library dependencies from various feeds
           # These are needed for compiling various passwall packages
           # Host build tools for different languages
-          ./scripts/feeds install golang rust lua liblua
+          # lua-dev provides lua.h and other development headers needed by lucihttp
+          ./scripts/feeds install golang rust lua lua-dev liblua
           
           # Install runtime and build-time dependencies required by passwall packages
           # This prevents "dependency does not exist" warnings during compilation
