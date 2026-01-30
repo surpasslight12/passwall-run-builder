@@ -98,11 +98,7 @@ tmp/.config-package.in:1244:warning: ignoring type redefinition of 'PACKAGE_cgi-
 Config-build.in:1247:warning: defaults for choice values not supported
 ```
 
-**这些警告是正常的，不会影响最终的编译结果。** 它们是 OpenWrt 的 Kconfig 配置系统在合并多个软件包的配置选项时产生的通知信息。本项目已通过以下方式确保 CI 构建不会在配置阶段卡住：
-
-- 使用 `yes '' | make defconfig` 自动接受所有默认配置
-- 设置 `TERM=dumb` 禁用交互式界面
-- 设置 `CI=1` 等环境变量确保完全非交互式运行
+**这些警告是正常的，不会影响最终的编译结果。** 它们是 OpenWrt 的 Kconfig 配置系统在合并多个软件包的配置选项时产生的通知信息。本项目通过使用 `yes '' | make defconfig` 自动接受所有默认配置，确保 CI 构建不会在配置阶段卡住等待用户输入。
 
 ### 构建失败或超时
 

@@ -100,9 +100,9 @@ jobs:
           ./scripts/feeds install luci-app-passwall
 
           # Generate default configuration and ensure all options are set non-interactively
-          # Use 'yes' to automatically accept all prompts and prevent interactive menuconfig
-          # TERM=dumb (set at step level) prevents ncurses UI, yes ensures no blocking prompts
-          yes '' | make defconfig || make defconfig
+          # Pipe empty responses to make defconfig to auto-accept all prompts
+          # This prevents interactive menuconfig (mconf) from blocking the CI build
+          yes '' | make defconfig
           
           # Compile luci-app-passwall and let make automatically build dependencies
           # This replaces 20+ individual package compilation commands with one command
