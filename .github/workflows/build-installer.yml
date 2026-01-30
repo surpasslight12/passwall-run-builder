@@ -81,6 +81,13 @@ jobs:
 
           ./scripts/feeds update passwall-luci passwall-packages
           
+          # Install luci-base first to get host tools like po2lmo
+          # These tools are required for building LuCI language packs
+          ./scripts/feeds install luci-base
+          
+          # Compile luci-base host tools (includes po2lmo for translation files)
+          make package/feeds/luci/luci-base/host/compile V=s
+          
           # Install luci-app-passwall which will automatically pull in its dependencies
           # This replaces the previous "install -a -p passwall-packages" which installed
           # ALL packages from passwall-packages feed (not needed, wastes time)
