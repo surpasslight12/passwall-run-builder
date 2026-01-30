@@ -86,4 +86,25 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 1. 优先尝试从源码编译（使用 OpenWrt SDK）
 2. 对于编译失败的包，自动从官方 PassWall 预编译版本下载补充
 
+## 常见问题 / FAQ
+
+### 构建过程中出现 Kconfig 警告
+
+在 CI 构建过程中，你可能会看到类似如下的警告信息：
+
+```
+tmp/.config-package.in:677:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
+tmp/.config-package.in:1244:warning: ignoring type redefinition of 'PACKAGE_cgi-io' from 'bool' to 'tristate'
+Config-build.in:1247:warning: defaults for choice values not supported
+```
+
+**这些警告是正常的，不会影响最终的编译结果。** 它们是 OpenWrt 的 Kconfig 配置系统在合并多个软件包的配置选项时产生的通知信息。本项目通过使用 `yes '' | make defconfig` 自动接受所有默认配置，确保 CI 构建不会在配置阶段卡住等待用户输入。
+
+### 构建失败或超时
+
+如果 GitHub Actions 构建失败或超时：
+1. 检查 OpenWrt SDK 的下载链接是否有效
+2. 查看构建日志，确认是网络问题还是编译错误
+3. 某些依赖包可能需要特定版本的 SDK，可以尝试切换 SDK 版本
+
 # passwall_run
