@@ -84,6 +84,9 @@ jobs:
 
           ./scripts/feeds update passwall-luci passwall-packages
           ./scripts/feeds install luci-app-passwall
+          
+          # Install all passwall dependency packages from feeds
+          ./scripts/feeds install -a -p passwall-packages
 
           make defconfig
           # 编译 luci-app-passwall 本体
@@ -166,8 +169,8 @@ jobs:
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
           echo "Dependencies count: $(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.ipk" | wc -l)"
-          echo "First 20 dependencies:"
-          ls -lh "$GITHUB_WORKSPACE/payload/depends/" | head -20
+          echo "All dependencies found:"
+          ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
 
       - name: Validate payload
         run: |
