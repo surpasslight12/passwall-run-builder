@@ -43,62 +43,88 @@ jobs:
           CI: 1
         run: |
           set -e
+          
+          echo "=========================================="
+          echo "[STEP] Downloading OpenWrt SDK"
+          echo "=========================================="
           mkdir -p openwrt-sdk
           cd openwrt-sdk
-          echo "Downloading OpenWrt SDK from: $OPENWRT_SDK_URL"
+          echo "SDK URL: $OPENWRT_SDK_URL"
           
           # Determine file extension from URL
           SDK_FILE=$(basename "$OPENWRT_SDK_URL")
+          echo "SDK File: $SDK_FILE"
           wget "$OPENWRT_SDK_URL" -O "$SDK_FILE"
           
           # Extract based on file extension
+          echo "Extracting SDK..."
           if [[ "$SDK_FILE" == *.tar.zst ]]; then
             tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1
           elif [[ "$SDK_FILE" == *.tar.xz ]]; then
             tar xf "$SDK_FILE" --strip-components=1
           else
-            echo "Unsupported SDK archive format: $SDK_FILE" >&2
+            echo "[ERROR] Unsupported SDK archive format: $SDK_FILE" >&2
             exit 1
           fi
+          echo "[SUCCESS] SDK extracted"
 
           # Initialize feeds configuration from default
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Configuring feeds"
+          echo "=========================================="
           if [ -f feeds.conf.default ]; then
             cp feeds.conf.default feeds.conf
+            echo "[SUCCESS] Copied feeds.conf.default to feeds.conf"
           else
-            echo "Warning: feeds.conf.default not found, feeds may not initialize correctly" >&2
+            echo "[WARNING] feeds.conf.default not found, feeds may not initialize correctly" >&2
           fi
 
           # Update base feeds needed for SDK compilation
           # Update all available feeds to ensure package indices are complete
+          echo "Updating feeds..."
           ./scripts/feeds update -a
 
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Setting up Passwall sources"
+          echo "=========================================="
           rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
+          echo "Cloning openwrt-passwall-packages..."
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
 
           rm -rf feeds/luci/applications/luci-app-passwall
+          echo "Cloning openwrt-passwall (luci)..."
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
 
           # 如果在 config/openwrt-sdk.conf 中设置了 PASSWALL_LUCI_REF，则将 luci 源码切换到指定分支/tag/commit
           if [ -n "${PASSWALL_LUCI_REF:-}" ]; then
-            echo "Using PASSWALL_LUCI_REF=$PASSWALL_LUCI_REF for openwrt-passwall (luci)"
+            echo "Checking out PASSWALL_LUCI_REF: $PASSWALL_LUCI_REF"
             git -C package/passwall-luci fetch --all --tags
             git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF"
           fi
+          echo "[SUCCESS] Passwall sources configured"
 
           # Note: passwall-luci and passwall-packages are cloned directly into package/
           # directory (not as feeds), so no need to update/install them as feeds
           # Re-index feeds after modifying feed directories to update package lists
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Installing build dependencies"
+          echo "=========================================="
           ./scripts/feeds update -i
           
           # Install required build host tools and library dependencies from various feeds
           # These are needed for compiling various passwall packages
           # Host build tools for different languages
           # lua-dev provides lua.h and other development headers needed by lucihttp
+          echo "Installing language toolchains..."
           ./scripts/feeds install golang rust lua lua-dev liblua
           
           # Install runtime and build-time dependencies required by passwall packages
           # This prevents "dependency does not exist" warnings during compilation
           # Some packages need both the library (lib*) and the build package (e.g., libpcre2 + pcre2)
+          echo "Installing runtime dependencies..."
           ./scripts/feeds install \
             libev libmbedtls libsodium libopenssl libpcre2 libudns \
             boost boost-program_options boost-system \
@@ -111,21 +137,30 @@ jobs:
           
           # Install luci-base first to get host tools like po2lmo
           # These tools are required for building LuCI language packs
+          echo "Installing LuCI base..."
           ./scripts/feeds install luci-base
           
           # Install luci-app-passwall which will automatically pull in its dependencies
           # This replaces the previous "install -a -p passwall-packages" which installed
           # ALL packages from passwall-packages feed (not needed, wastes time)
+          echo "Installing luci-app-passwall..."
           ./scripts/feeds install luci-app-passwall
+          echo "[SUCCESS] Dependencies installed"
 
           # Generate default configuration and ensure all options are set non-interactively
           # This MUST be done before compiling any packages to avoid menuconfig errors
           # Pipe empty responses to make defconfig to auto-accept all prompts
           # This prevents interactive menuconfig (mconf) from blocking the CI build
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Configuring build options"
+          echo "=========================================="
+          echo "Running defconfig..."
           yes '' | make defconfig
           
           # Enable all passwall dependency packages in config
           # These packages are optional and need to be explicitly enabled for compilation
+          echo "Enabling passwall packages in config..."
           cat >> .config << 'EOF'
           CONFIG_PACKAGE_chinadns-ng=m
           CONFIG_PACKAGE_dns2socks=m
@@ -152,28 +187,41 @@ jobs:
           CONFIG_PACKAGE_xray-plugin=m
           EOF
           yes '' | make defconfig
+          echo "[SUCCESS] Build configured"
           
           # Compile luci-base host tools (includes po2lmo for translation files)
           # This is now done AFTER defconfig to ensure .config exists
           # Note: lua and other dependencies will be automatically compiled when needed
           # by the OpenWrt build system's dependency resolution
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Compiling luci-base host tools"
+          echo "=========================================="
           make package/feeds/luci/luci-base/host/compile V=s
           
           # Compile luci-app-passwall
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Compiling luci-app-passwall"
+          echo "=========================================="
           make package/luci-app-passwall/compile -j"$(nproc)" V=s || {
-            echo "Parallel build failed, retrying with single thread for clearer error messages"
+            echo "[WARNING] Parallel build failed, retrying with single thread for clearer error messages"
             make package/luci-app-passwall/compile V=s
           }
           
           # Compile all passwall dependency packages
           # Build each package individually to ensure all dependencies are compiled
-          echo "Building passwall dependency packages..."
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Building passwall dependency packages"
+          echo "=========================================="
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
             trojan-plus tuic-client v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
           
           for pkg in $PASSWALL_DEPS; do
-            echo "=== Building $pkg ==="
+            echo ""
+            echo "--- Building: $pkg ---"
             # Try to find the package location first (could be in package/passwall-packages or feeds)
             PKG_PATH=""
             if [ -d "package/passwall-packages/$pkg" ]; then
@@ -184,21 +232,27 @@ jobs:
             
             if [ -n "$PKG_PATH" ]; then
               make "$PKG_PATH/compile" -j"$(nproc)" V=s 2>&1 || {
-                echo "Warning: Failed to compile $pkg with parallel build, trying single thread"
+                echo "[WARNING] Failed to compile $pkg with parallel build, trying single thread"
                 make "$PKG_PATH/compile" V=s 2>&1 || {
-                  echo "Warning: Failed to compile $pkg, will use prebuilt if available"
+                  echo "[WARNING] Failed to compile $pkg, will use prebuilt if available"
                 }
               }
             else
-              echo "Warning: Package $pkg not found in expected locations"
+              echo "[WARNING] Package $pkg not found in expected locations"
             fi
           done
           
           # Build the Chinese language pack (optional, non-critical)
+          echo ""
+          echo "--- Building: luci-i18n-passwall-zh-cn ---"
           make package/luci-i18n-passwall-zh-cn/compile -j"$(nproc)" || true
 
           # 下载并补充官方预编译的依赖包（用于补充编译失败的包）
           # 从 OPENWRT_SDK_URL 提取架构信息
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Detecting target architecture"
+          echo "=========================================="
           # SDK URL 格式示例: .../targets/x86/64/... 或 .../targets/ramips/mt7621/...
           TARGET_ARCH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\1#p')
           TARGET_SUBTARGET=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\2#p')
@@ -219,15 +273,21 @@ jobs:
             ARCH_NAME="arm_cortex-a7_neon-vfpv4"
           else
             # 默认使用 x86_64
-            echo "Warning: Unknown architecture ${TARGET_ARCH}/${TARGET_SUBTARGET}, using x86_64 as fallback"
+            echo "[WARNING] Unknown architecture ${TARGET_ARCH}/${TARGET_SUBTARGET}, using x86_64 as fallback"
             ARCH_NAME="x86_64"
           fi
-          echo "Target architecture: ${TARGET_ARCH}/${TARGET_SUBTARGET} -> Package arch: $ARCH_NAME"
+          echo "SDK URL: $OPENWRT_SDK_URL"
+          echo "Target: ${TARGET_ARCH}/${TARGET_SUBTARGET}"
+          echo "Package architecture: $ARCH_NAME"
 
           # 下载官方最新的预编译依赖包（用于补充编译失败的包或使用更新的版本）
           # 使用最新的稳定版本标签
-          PASSWALL_RELEASE="26.1.13-1"
-          echo "Downloading prebuilt packages from Passwall release $PASSWALL_RELEASE"
+          PASSWALL_RELEASE="26.1.30-1"
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Downloading prebuilt packages"
+          echo "=========================================="
+          echo "Release version: $PASSWALL_RELEASE"
           
           cd "$GITHUB_WORKSPACE"
           mkdir -p prebuilt-packages
@@ -238,22 +298,25 @@ jobs:
           DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
           PREBUILT_DOWNLOADED=false
           
-          echo "Attempting to download: $DOWNLOAD_URL"
+          echo "Download URL: $DOWNLOAD_URL"
+          echo ""
           if wget -q "$DOWNLOAD_URL"; then
-            echo "Successfully downloaded $PACKAGE_ZIP"
+            echo "[SUCCESS] Downloaded $PACKAGE_ZIP"
             unzip -q "$PACKAGE_ZIP"
             PREBUILT_DOWNLOADED=true
           else
-            echo "Warning: Failed to download $PACKAGE_ZIP, will try with x86_64 as fallback architecture"
+            echo "[WARNING] Failed to download $PACKAGE_ZIP"
+            echo "Trying fallback architecture: x86_64"
             # 尝试通用的 x86_64 包
             PACKAGE_ZIP="passwall_packages_ipk_x86_64.zip"
             DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
+            echo "Fallback URL: $DOWNLOAD_URL"
             if wget -q "$DOWNLOAD_URL"; then
-              echo "Successfully downloaded $PACKAGE_ZIP (fallback)"
+              echo "[SUCCESS] Downloaded $PACKAGE_ZIP (fallback)"
               unzip -q "$PACKAGE_ZIP"
               PREBUILT_DOWNLOADED=true
             else
-              echo "Warning: Could not download prebuilt packages, will rely on compiled packages only"
+              echo "[WARNING] Could not download prebuilt packages, will rely on compiled packages only"
             fi
           fi
           
@@ -275,8 +338,10 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
 
-          # Collect built dependency packages to a separate directory
-          echo "=== Collecting built packages ==="
+          echo ""
+          echo "=========================================="
+          echo "[STEP] Collecting built packages"
+          echo "=========================================="
           # Binary package name prefixes for version comparison
           # Format: package-name_version_arch.ipk (e.g., xray-core_25.12.8-r1_x86_64.ipk)
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
@@ -291,10 +356,10 @@ jobs:
             find bin/packages -type f -name "${pkg_name}_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
           done
           
-          echo "Built packages found:"
-          ls -1 "$GITHUB_WORKSPACE/built-packages/" 2>/dev/null | sort || echo "(none)"
+          echo ""
+          echo "Built packages found (count: $(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)):"
+          find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | xargs -r -n1 basename | sort | sed 's/^/  - /' || echo "  (none)"
           BUILT_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)
-          echo "Built package count: $BUILT_COUNT"
 
           # Version comparison function
           # Returns 0 if $1 version >= $2 version, otherwise returns 1
@@ -315,9 +380,14 @@ jobs:
           }
 
           echo ""
-          echo "=== Comparing built vs prebuilt packages ==="
-          echo "Package selection (newer version wins):"
-          echo "-------------------------------------------"
+          echo "=========================================="
+          echo "[STEP] Comparing built vs prebuilt packages"
+          echo "=========================================="
+          echo ""
+          echo "Decision logic: Select newer version (built version preferred when equal)"
+          echo ""
+          printf "%-35s %-15s %-15s %-10s\n" "Package" "Built Ver" "Prebuilt Ver" "Selected"
+          printf "%-35s %-15s %-15s %-10s\n" "-----------------------------------" "---------------" "---------------" "----------"
           
           # 遍历每个包名前缀，比较 built 和 prebuilt 版本
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
@@ -352,28 +422,23 @@ jobs:
               if compare_versions "$BUILT_VER" "$PREBUILT_VER"; then
                 SELECTED="$BUILT_PKG"
                 SOURCE="BUILT"
-                if [ "$BUILT_VER" = "$PREBUILT_VER" ]; then
-                  echo "  $pkg_prefix: $BUILT_VER (built = prebuilt, using BUILT)"
-                else
-                  echo "  $pkg_prefix: $BUILT_VER > $PREBUILT_VER (using BUILT)"
-                fi
               else
                 SELECTED="$PREBUILT_PKG"
                 SOURCE="PREBUILT"
-                echo "  $pkg_prefix: $PREBUILT_VER > $BUILT_VER (using PREBUILT)"
               fi
+              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "$BUILT_VER" "$PREBUILT_VER" "$SOURCE"
             elif [ -n "$BUILT_PKG" ]; then
               # 只有 built 版本
               SELECTED="$BUILT_PKG"
               SOURCE="BUILT"
-              echo "  $pkg_prefix: $BUILT_VER (BUILT only)"
+              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "$BUILT_VER" "(none)" "$SOURCE"
             elif [ -n "$PREBUILT_PKG" ]; then
               # 只有 prebuilt 版本
               SELECTED="$PREBUILT_PKG"
               SOURCE="PREBUILT"
-              echo "  $pkg_prefix: $PREBUILT_VER (PREBUILT only)"
+              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "(none)" "$PREBUILT_VER" "$SOURCE"
             else
-              echo "  $pkg_prefix: NOT FOUND (neither built nor prebuilt)"
+              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "(none)" "(none)" "MISSING"
               continue
             fi
             
@@ -383,13 +448,14 @@ jobs:
             fi
           done
           
-          echo "-------------------------------------------"
+          echo ""
           cd "$GITHUB_WORKSPACE/openwrt-sdk"
 
           # 如果没有找到任何依赖，直接报错退出，避免生成只有主包没有依赖的安装器
           DEP_COUNT=$(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.ipk" | wc -l)
           if [ "$DEP_COUNT" -eq 0 ]; then
-            echo "Error: no dependency IPK files were found and copied into payload/depends" >&2
+            echo ""
+            echo "[ERROR] No dependency IPK files were found and copied into payload/depends" >&2
             exit 1
           fi
           
@@ -400,20 +466,21 @@ jobs:
           # xray-core, xray-plugin (total: 23)
           # Note: shadowsocks-libev (3) packages may not be included in prebuilt releases
           if [ "$DEP_COUNT" -lt 20 ]; then
-            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20-23 packages."
+            echo ""
+            echo "[WARNING] Only $DEP_COUNT dependency packages found. Expected at least 20-23 packages."
             echo "Some packages may not be available in either built or prebuilt form."
-            echo "Current packages:"
-            ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
           fi
 
           echo ""
-          echo "=== Final package summary ==="
-          echo "Packages copied successfully:"
-          ls -lh "$GITHUB_WORKSPACE/payload/"
+          echo "=========================================="
+          echo "[STEP] Final package summary"
+          echo "=========================================="
           echo ""
-          echo "Dependencies count: $DEP_COUNT"
-          echo "All dependencies:"
-          ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
+          echo "Main packages:"
+          find "$GITHUB_WORKSPACE/payload/" -maxdepth 1 -name "*.ipk" 2>/dev/null | xargs -r -n1 basename | sort | sed 's/^/  - /' || echo "  (none)"
+          echo ""
+          echo "Dependency packages (total: $DEP_COUNT):"
+          ls -1 "$GITHUB_WORKSPACE/payload/depends/" 2>/dev/null | sort | sed 's/^/  - /' || echo "  (none)"
 
       - name: Validate payload
         run: |
