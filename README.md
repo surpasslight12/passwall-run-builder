@@ -60,6 +60,7 @@
    - `payload/luci-i18n-passwall-zh-cn_*.ipk`
    - `payload/depends/*.ipk`
 - 本项目的 `payload/install.sh` 已根据官方安装脚本编写，会在 OpenWrt 设备上调用 `opkg` 安装/强制重装这些 IPK，并处理部分旧依赖问题。
+- **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在 OpenWrt SDK 24.10 下编译可能失败，workflow 会自动从官方 PassWall 发布中下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。
 
 生成的 `.run` 文件可以直接在 Linux 上执行：
 
@@ -67,4 +68,22 @@
 chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 ./PassWall_26.1.21_x86_64_all_sdk_24.10.run
 ```
+
+## 依赖包说明
+
+本项目生成的安装包包含以下依赖（20+ 个 IPK 文件）：
+
+- **核心代理工具**：xray-core, sing-box, v2ray-plugin, xray-plugin
+- **传输协议**：
+  - shadowsocks-libev (ss-local, ss-redir, ss-server)
+  - shadowsocks-rust (sslocal, ssserver)
+  - shadowsocksr-libev (ssr-local, ssr-redir, ssr-server)
+  - trojan-plus, hysteria, naiveproxy, tuic-client
+- **辅助工具**：chinadns-ng, dns2socks, ipt2socks, microsocks, simple-obfs-client, tcping, shadow-tls
+- **地理数据**：v2ray-geoip, v2ray-geosite, geoview
+
+这些依赖包通过以下方式获取：
+1. 优先尝试从源码编译（使用 OpenWrt SDK）
+2. 对于编译失败的包，自动从官方 PassWall 预编译版本下载补充
+
 # passwall_run
