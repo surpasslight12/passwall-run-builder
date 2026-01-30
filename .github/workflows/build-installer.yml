@@ -28,6 +28,8 @@ jobs:
           fi
 
       - name: Install build dependencies and makeself
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -36,7 +38,7 @@ jobs:
 
       - name: Build PassWall IPK with OpenWrt SDK
         env:
-          TERM: xterm
+          TERM: dumb
         run: |
           set -e
           mkdir -p openwrt-sdk
@@ -95,6 +97,8 @@ jobs:
           # ALL packages from passwall-packages feed (not needed, wastes time)
           ./scripts/feeds install luci-app-passwall
 
+          # Generate default configuration and ensure all options are set non-interactively
+          # TERM=dumb prevents interactive ncurses-based menuconfig
           make defconfig
           
           # Compile luci-app-passwall and let make automatically build dependencies
