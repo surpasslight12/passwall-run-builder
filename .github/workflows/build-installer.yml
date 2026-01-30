@@ -277,6 +277,8 @@ jobs:
 
           # Collect built dependency packages to a separate directory
           echo "=== Collecting built packages ==="
+          # Binary package name prefixes for version comparison
+          # Format: package-name_version_arch.ipk (e.g., xray-core_25.12.8-r1_x86_64.ipk)
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
@@ -284,56 +286,31 @@ jobs:
             simple-obfs-client sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
           
-          find bin/packages -type f \( \
-              -name 'chinadns-ng_*.ipk' \
-           -o -name 'dns2socks_*.ipk' \
-           -o -name 'geoview_*.ipk' \
-           -o -name 'hysteria_*.ipk' \
-           -o -name 'ipt2socks_*.ipk' \
-           -o -name 'microsocks_*.ipk' \
-           -o -name 'naiveproxy_*.ipk' \
-           -o -name 'shadow-tls_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-local_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-redir_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-server_*.ipk' \
-           -o -name 'shadowsocks-rust-sslocal_*.ipk' \
-           -o -name 'shadowsocks-rust-ssserver_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-local_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-redir_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-server_*.ipk' \
-           -o -name 'simple-obfs-client_*.ipk' \
-           -o -name 'sing-box_*.ipk' \
-           -o -name 'tcping_*.ipk' \
-           -o -name 'trojan-plus_*.ipk' \
-           -o -name 'tuic-client_*.ipk' \
-           -o -name 'v2ray-geoip_*.ipk' \
-           -o -name 'v2ray-geosite_*.ipk' \
-           -o -name 'v2ray-plugin_*.ipk' \
-           -o -name 'xray-core_*.ipk' \
-           -o -name 'xray-plugin_*.ipk' \
-          \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
+          # Copy built packages matching the patterns to the built-packages directory
+          for pkg_name in $DEPENDENCY_PATTERNS; do
+            find bin/packages -type f -name "${pkg_name}_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
+          done
           
           echo "Built packages found:"
           ls -1 "$GITHUB_WORKSPACE/built-packages/" 2>/dev/null | sort || echo "(none)"
           BUILT_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)
           echo "Built package count: $BUILT_COUNT"
 
-          # 版本比较函数：从 IPK 文件名中提取版本号并比较
-          # 返回 0 如果 $1 版本 >= $2 版本，否则返回 1
+          # Version comparison function
+          # Returns 0 if $1 version >= $2 version, otherwise returns 1
+          # Uses sort -V to find the highest version between two versions
           compare_versions() {
             local ver1="$1"
             local ver2="$2"
-            # 使用 sort -V 进行版本比较
             local highest=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
             [ "$ver1" = "$highest" ]
           }
           
-          # 从 IPK 文件名提取版本号（格式：package-name_version_arch.ipk）
+          # Extract version from IPK filename
+          # Expected format: package-name_version_arch.ipk (e.g., xray-core_25.12.8-r1_x86_64.ipk)
           extract_version() {
             local filename="$1"
-            # 移除路径，只保留文件名
             filename=$(basename "$filename")
-            # 提取版本号部分（第二个 _ 分隔的字段）
             echo "$filename" | sed 's/^[^_]*_\([^_]*\)_.*/\1/'
           }
 
@@ -416,11 +393,15 @@ jobs:
             exit 1
           fi
           
-          # 建议至少应该有 20 个依赖包
-          # 注意：某些包可能在编译或预编译中都不可用
+          # Expected minimum: 23 packages for a complete installation
+          # The list includes: chinadns-ng, dns2socks, geoview, hysteria, ipt2socks, microsocks,
+          # naiveproxy, shadow-tls, shadowsocks-rust (2), shadowsocksr-libev (3), simple-obfs-client,
+          # sing-box, tcping, trojan-plus, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin,
+          # xray-core, xray-plugin (total: 23)
+          # Note: shadowsocks-libev (3) packages may not be included in prebuilt releases
           if [ "$DEP_COUNT" -lt 20 ]; then
-            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20 packages."
-            echo "This may indicate that some packages failed to compile and prebuilt packages were not available."
+            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20-23 packages."
+            echo "Some packages may not be available in either built or prebuilt form."
             echo "Current packages:"
             ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
           fi
