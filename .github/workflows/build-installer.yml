@@ -69,8 +69,8 @@ jobs:
           fi
 
           # Update base feeds needed for SDK compilation
-          # Only update feeds, don't install all packages yet (that's the optimization)
-          ./scripts/feeds update packages luci
+          # Update all available feeds to ensure package indices are complete
+          ./scripts/feeds update -a
 
           rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
@@ -85,7 +85,10 @@ jobs:
             git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF"
           fi
 
-          ./scripts/feeds update passwall-luci passwall-packages
+          # Note: passwall-luci and passwall-packages are cloned directly into package/
+          # directory (not as feeds), so no need to update/install them as feeds
+          # Re-index feeds after modifying feed directories to update package lists
+          ./scripts/feeds update -i
           
           # Install required build host tools and library dependencies from various feeds
           # These are needed for compiling various passwall packages
@@ -123,11 +126,9 @@ jobs:
           
           # Compile luci-base host tools (includes po2lmo for translation files)
           # This is now done AFTER defconfig to ensure .config exists
+          # Note: lua and other dependencies will be automatically compiled when needed
+          # by the OpenWrt build system's dependency resolution
           make package/feeds/luci/luci-base/host/compile V=s
-          
-          # Compile lua to stage lua headers (lua.h) needed by lucihttp
-          # This must be done before compiling luci-app-passwall since lucihttp depends on lua headers
-          make package/feeds/packages/lua/compile V=s
           
           # Compile luci-app-passwall and let make automatically build dependencies
           # This replaces 20+ individual package compilation commands with one command
