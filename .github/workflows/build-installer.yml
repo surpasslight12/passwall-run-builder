@@ -87,13 +87,14 @@ jobs:
 
           ./scripts/feeds update passwall-luci passwall-packages
           
-          # Install required build host tools and library dependencies from packages feed
+          # Install required build host tools and library dependencies from various feeds
           # These are needed for compiling various passwall packages
           # Host build tools for different languages
           ./scripts/feeds install golang rust lua
           
-          # Install runtime libraries required by passwall packages
+          # Install runtime and build-time dependencies required by passwall packages
           # This prevents "dependency does not exist" warnings during compilation
+          # Some packages need both the library (lib*) and the build package (e.g., libpcre2 + pcre2)
           ./scripts/feeds install \
             libev libmbedtls libsodium libopenssl libpcre2 libudns \
             boost boost-program_options boost-system \
