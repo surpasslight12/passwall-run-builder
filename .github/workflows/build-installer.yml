@@ -36,7 +36,8 @@ jobs:
 
       - name: Build PassWall IPK with OpenWrt SDK
         env:
-          TERM: xterm
+          TERM: dumb
+          DEBIAN_FRONTEND: noninteractive
         run: |
           set -e
           mkdir -p openwrt-sdk
@@ -95,7 +96,12 @@ jobs:
           # ALL packages from passwall-packages feed (not needed, wastes time)
           ./scripts/feeds install luci-app-passwall
 
+          # Generate default configuration and ensure all options are set non-interactively
           make defconfig
+          
+          # Apply defaults to any remaining configuration options without user interaction
+          # This prevents the build from hanging on interactive prompts
+          yes "" | make oldconfig || true
           
           # Compile luci-app-passwall and let make automatically build dependencies
           # This replaces 20+ individual package compilation commands with one command
