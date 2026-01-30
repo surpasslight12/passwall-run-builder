@@ -119,15 +119,30 @@ jobs:
 
           # 下载并补充官方预编译的依赖包（用于补充编译失败的包）
           # 从 OPENWRT_SDK_URL 提取架构信息
-          ARCH_PATH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\1_\2#p')
-          if [ -z "$ARCH_PATH" ]; then
-            echo "Warning: Could not extract architecture from SDK URL, using x86_64 as fallback"
-            ARCH_PATH="x86_64"
+          # SDK URL 格式示例: .../targets/x86/64/... 或 .../targets/ramips/mt7621/...
+          TARGET_ARCH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\1#p')
+          TARGET_SUBTARGET=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\2#p')
+          
+          # 架构映射：将 OpenWrt target/subtarget 映射到 Passwall 包名
+          # x86/64 -> x86_64, ramips/mt7621 -> mipsel_24kc, 等等
+          if [ "$TARGET_ARCH" = "x86" ] && [ "$TARGET_SUBTARGET" = "64" ]; then
+            ARCH_NAME="x86_64"
+          elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7621" ]; then
+            ARCH_NAME="mipsel_24kc"
+          elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7620" ]; then
+            ARCH_NAME="mipsel_24kc"
+          elif [ "$TARGET_ARCH" = "ath79" ] && [ "$TARGET_SUBTARGET" = "generic" ]; then
+            ARCH_NAME="mips_24kc"
+          elif [ "$TARGET_ARCH" = "bcm27xx" ] || [ "$TARGET_ARCH" = "bcm2708" ]; then
+            ARCH_NAME="arm_cortex-a7"
+          elif [ "$TARGET_ARCH" = "ipq40xx" ]; then
+            ARCH_NAME="arm_cortex-a7_neon-vfpv4"
           else
-            # 将路径转换为架构名称（例如 x86/64 -> x86_64）
-            ARCH_PATH=$(echo "$ARCH_PATH" | sed 's#/#_#g')
+            # 默认使用 x86_64
+            echo "Warning: Unknown architecture ${TARGET_ARCH}/${TARGET_SUBTARGET}, using x86_64 as fallback"
+            ARCH_NAME="x86_64"
           fi
-          echo "Target architecture: $ARCH_PATH"
+          echo "Target architecture: ${TARGET_ARCH}/${TARGET_SUBTARGET} -> Package arch: $ARCH_NAME"
 
           # 下载官方最新的预编译依赖包
           # 使用最新的稳定版本标签
@@ -139,7 +154,7 @@ jobs:
           cd prebuilt-packages
           
           # 下载对应架构的预编译包
-          PACKAGE_ZIP="passwall_packages_ipk_${ARCH_PATH}.zip"
+          PACKAGE_ZIP="passwall_packages_ipk_${ARCH_NAME}.zip"
           DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
           
           echo "Attempting to download: $DOWNLOAD_URL"
