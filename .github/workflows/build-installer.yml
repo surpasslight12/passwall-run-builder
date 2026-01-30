@@ -245,6 +245,12 @@ jobs:
             echo "Error: no dependency IPK files were found and copied into payload/depends" >&2
             exit 1
           fi
+          
+          # 建议至少应该有 20+ 个依赖包（包括预编译包补充）
+          if [ "$DEP_COUNT" -lt 20 ]; then
+            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20 packages."
+            echo "This may indicate that some packages failed to compile and prebuilt packages were not downloaded successfully."
+          fi
 
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
