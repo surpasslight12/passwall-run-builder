@@ -91,18 +91,20 @@ jobs:
           # These tools are required for building LuCI language packs
           ./scripts/feeds install luci-base
           
-          # Compile luci-base host tools (includes po2lmo for translation files)
-          make package/feeds/luci/luci-base/host/compile V=s
-          
           # Install luci-app-passwall which will automatically pull in its dependencies
           # This replaces the previous "install -a -p passwall-packages" which installed
           # ALL packages from passwall-packages feed (not needed, wastes time)
           ./scripts/feeds install luci-app-passwall
 
           # Generate default configuration and ensure all options are set non-interactively
+          # This MUST be done before compiling any packages to avoid menuconfig errors
           # Pipe empty responses to make defconfig to auto-accept all prompts
           # This prevents interactive menuconfig (mconf) from blocking the CI build
           yes '' | make defconfig
+          
+          # Compile luci-base host tools (includes po2lmo for translation files)
+          # This is now done AFTER defconfig to ensure .config exists
+          make package/feeds/luci/luci-base/host/compile V=s
           
           # Compile luci-app-passwall and let make automatically build dependencies
           # This replaces 20+ individual package compilation commands with one command
