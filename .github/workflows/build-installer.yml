@@ -94,6 +94,7 @@ jobs:
 
           # 额外编译官方安装包中包含的依赖 IPK，确保后面白名单拷贝时这些包实际存在
           # 单个主包会生成多个子 ipk（如 shadowsocks-libev-ss-local 等）
+          # 注意：某些包在 SDK 24.10 下可能编译失败，这些包将从官方预编译版本下载
           make package/chinadns-ng/compile -j"$(nproc)" || true
           make package/dns2socks/compile -j"$(nproc)"
           make package/geoview/compile -j"$(nproc)" || true
@@ -115,6 +116,70 @@ jobs:
           make package/v2ray-plugin/compile -j"$(nproc)" || true
           make package/xray-core/compile -j"$(nproc)" || true
           make package/xray-plugin/compile -j"$(nproc)" || true
+
+          # 下载并补充官方预编译的依赖包（用于补充编译失败的包）
+          # 从 OPENWRT_SDK_URL 提取架构信息
+          ARCH_PATH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\1_\2#p')
+          if [ -z "$ARCH_PATH" ]; then
+            echo "Warning: Could not extract architecture from SDK URL, using x86_64 as fallback"
+            ARCH_PATH="x86_64"
+          else
+            # 将路径转换为架构名称（例如 x86/64 -> x86_64）
+            ARCH_PATH=$(echo "$ARCH_PATH" | sed 's#/#_#g')
+          fi
+          echo "Target architecture: $ARCH_PATH"
+
+          # 下载官方最新的预编译依赖包
+          # 使用最新的稳定版本标签
+          PASSWALL_RELEASE="26.1.13-1"
+          echo "Downloading prebuilt packages from Passwall release $PASSWALL_RELEASE"
+          
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p prebuilt-packages
+          cd prebuilt-packages
+          
+          # 下载对应架构的预编译包
+          PACKAGE_ZIP="passwall_packages_ipk_${ARCH_PATH}.zip"
+          DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
+          
+          echo "Attempting to download: $DOWNLOAD_URL"
+          if wget -q "$DOWNLOAD_URL"; then
+            echo "Successfully downloaded $PACKAGE_ZIP"
+            unzip -q "$PACKAGE_ZIP"
+            
+            # 将预编译包复制到 SDK 的 bin/packages 目录，这样 find 命令可以找到它们
+            # 检测 SDK 中的架构目录
+            SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
+            if [ -n "$SDK_PKG_DIR" ]; then
+              echo "Copying prebuilt packages to $SDK_PKG_DIR"
+              cp -v *.ipk "$SDK_PKG_DIR/" || true
+            else
+              # 如果找不到目标目录，创建一个
+              mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
+              echo "Copying prebuilt packages to bin/packages/prebuilt/passwall_packages"
+              cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" || true
+            fi
+          else
+            echo "Warning: Failed to download $PACKAGE_ZIP, will try without architecture suffix"
+            # 尝试通用的 x86_64 包
+            PACKAGE_ZIP="passwall_packages_ipk_x86_64.zip"
+            DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
+            if wget -q "$DOWNLOAD_URL"; then
+              echo "Successfully downloaded $PACKAGE_ZIP (fallback)"
+              unzip -q "$PACKAGE_ZIP"
+              SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
+              if [ -n "$SDK_PKG_DIR" ]; then
+                cp -v *.ipk "$SDK_PKG_DIR/" || true
+              else
+                mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
+                cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" || true
+              fi
+            else
+              echo "Warning: Could not download prebuilt packages, will rely on compiled packages only"
+            fi
+          fi
+          
+          cd "$GITHUB_WORKSPACE/openwrt-sdk"
 
           # Create target directories
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
