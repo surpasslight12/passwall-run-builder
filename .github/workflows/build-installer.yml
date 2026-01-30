@@ -62,12 +62,9 @@ jobs:
             echo "Warning: feeds.conf.default not found, feeds may not initialize correctly" >&2
           fi
 
-          # Update only the feeds we need (exclude telephony to avoid package collection errors)
-          ./scripts/feeds update packages luci routing base
-          ./scripts/feeds install -a -p packages
-          ./scripts/feeds install -a -p luci
-          ./scripts/feeds install -a -p routing
-          ./scripts/feeds install -a -p base
+          # Update only base feeds (minimal set required for SDK)
+          # Note: We'll selectively install only what passwall needs, not everything
+          ./scripts/feeds update packages luci
 
           rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
           git clone https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
@@ -83,39 +80,25 @@ jobs:
           fi
 
           ./scripts/feeds update passwall-luci passwall-packages
-          ./scripts/feeds install luci-app-passwall
           
-          # Install all passwall dependency packages from feeds
-          ./scripts/feeds install -a -p passwall-packages
+          # Install only the passwall app and its direct dependencies
+          # This will automatically pull in all required packages from passwall-packages feed
+          ./scripts/feeds install luci-app-passwall
 
           make defconfig
-          # 编译 luci-app-passwall 本体
-          make package/luci-app-passwall/compile -j"$(nproc)"
-
-          # 额外编译官方安装包中包含的依赖 IPK，确保后面白名单拷贝时这些包实际存在
-          # 单个主包会生成多个子 ipk（如 shadowsocks-libev-ss-local 等）
-          # 注意：某些包在 SDK 24.10 下可能编译失败，这些包将从官方预编译版本下载
-          make package/chinadns-ng/compile -j"$(nproc)" || true
-          make package/dns2socks/compile -j"$(nproc)"
-          make package/geoview/compile -j"$(nproc)" || true
-          make package/hysteria/compile -j"$(nproc)" || true
-          make package/ipt2socks/compile -j"$(nproc)"
-          make package/microsocks/compile -j"$(nproc)"
-          make package/naiveproxy/compile -j"$(nproc)" || true
-          make package/shadow-tls/compile -j"$(nproc)" || true
-          make package/shadowsocks-libev/compile -j"$(nproc)"
-          make package/shadowsocks-rust/compile -j"$(nproc)" || true
-          make package/shadowsocksr-libev/compile -j"$(nproc)"
-          make package/simple-obfs/compile -j"$(nproc)" || true
-          make package/sing-box/compile -j"$(nproc)" || true
-          make package/tcping/compile -j"$(nproc)"
-          make package/trojan-plus/compile -j"$(nproc)" || true
-          make package/tuic-client/compile -j"$(nproc)" || true
-          make package/v2ray-geoip/compile -j"$(nproc)" || true
-          make package/v2ray-geosite/compile -j"$(nproc)" || true
-          make package/v2ray-plugin/compile -j"$(nproc)" || true
-          make package/xray-core/compile -j"$(nproc)" || true
-          make package/xray-plugin/compile -j"$(nproc)" || true
+          
+          # Compile luci-app-passwall and all its dependencies in one go
+          # The make system will automatically resolve and build all required packages
+          # Including: chinadns-ng, dns2socks, ipt2socks, microsocks, shadowsocks-*, 
+          #            shadowsocksr-libev, tcping, v2ray-*, xray-*, sing-box, etc.
+          # Use V=s for verbose output to see what's being compiled
+          make package/luci-app-passwall/compile -j"$(nproc)" V=s || {
+            echo "First build attempt failed, trying again with single thread for better error visibility"
+            make package/luci-app-passwall/compile V=s
+          }
+          
+          # Also build the language pack
+          make package/luci-i18n-passwall-zh-cn/compile -j"$(nproc)" || true
 
           # 下载并补充官方预编译的依赖包（用于补充编译失败的包）
           # 从 OPENWRT_SDK_URL 提取架构信息
