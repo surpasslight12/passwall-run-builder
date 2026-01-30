@@ -125,6 +125,10 @@ jobs:
           # This is now done AFTER defconfig to ensure .config exists
           make package/feeds/luci/luci-base/host/compile V=s
           
+          # Compile lua-dev to stage lua headers (lua.h) needed by lucihttp
+          # This must be done before compiling luci-app-passwall since lucihttp depends on lua headers
+          make package/feeds/packages/lua/compile V=s
+          
           # Compile luci-app-passwall and let make automatically build dependencies
           # This replaces 20+ individual package compilation commands with one command
           # that leverages OpenWrt's dependency resolution system
