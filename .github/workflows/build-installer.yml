@@ -90,7 +90,7 @@ jobs:
           # Install required build host tools and library dependencies from various feeds
           # These are needed for compiling various passwall packages
           # Host build tools for different languages
-          ./scripts/feeds install golang rust lua
+          ./scripts/feeds install golang rust lua liblua
           
           # Install runtime and build-time dependencies required by passwall packages
           # This prevents "dependency does not exist" warnings during compilation
