@@ -357,8 +357,8 @@ jobs:
           done
           
           echo ""
-          echo "Built packages found (count: $(ls "$GITHUB_WORKSPACE/built-packages/" 2>/dev/null | wc -l)):"
-          ls -1 "$GITHUB_WORKSPACE/built-packages/" 2>/dev/null | sort | sed 's/^/  - /' || echo "  (none)"
+          echo "Built packages found (count: $(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)):"
+          find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | xargs -r -n1 basename | sort | sed 's/^/  - /' || echo "  (none)"
           BUILT_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)
 
           # Version comparison function
@@ -477,10 +477,10 @@ jobs:
           echo "=========================================="
           echo ""
           echo "Main packages:"
-          ls -1 "$GITHUB_WORKSPACE/payload/"*.ipk 2>/dev/null | xargs -n1 basename | sed 's/^/  - /' || echo "  (none)"
+          find "$GITHUB_WORKSPACE/payload/" -maxdepth 1 -name "*.ipk" 2>/dev/null | xargs -r -n1 basename | sort | sed 's/^/  - /' || echo "  (none)"
           echo ""
           echo "Dependency packages (total: $DEP_COUNT):"
-          ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort | sed 's/^/  - /'
+          ls -1 "$GITHUB_WORKSPACE/payload/depends/" 2>/dev/null | sort | sed 's/^/  - /' || echo "  (none)"
 
       - name: Validate payload
         run: |
