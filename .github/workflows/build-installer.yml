@@ -167,15 +167,17 @@ jobs:
             SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
             if [ -n "$SDK_PKG_DIR" ]; then
               echo "Copying prebuilt packages to $SDK_PKG_DIR"
-              cp -v *.ipk "$SDK_PKG_DIR/" || true
+              COPIED=$(cp -v *.ipk "$SDK_PKG_DIR/" 2>&1 | wc -l)
+              echo "Copied $COPIED prebuilt package(s)"
             else
               # 如果找不到目标目录，创建一个
               mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
               echo "Copying prebuilt packages to bin/packages/prebuilt/passwall_packages"
-              cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" || true
+              COPIED=$(cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" 2>&1 | wc -l)
+              echo "Copied $COPIED prebuilt package(s)"
             fi
           else
-            echo "Warning: Failed to download $PACKAGE_ZIP, will try without architecture suffix"
+            echo "Warning: Failed to download $PACKAGE_ZIP, will try with x86_64 as fallback architecture"
             # 尝试通用的 x86_64 包
             PACKAGE_ZIP="passwall_packages_ipk_x86_64.zip"
             DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
@@ -184,10 +186,12 @@ jobs:
               unzip -q "$PACKAGE_ZIP"
               SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
               if [ -n "$SDK_PKG_DIR" ]; then
-                cp -v *.ipk "$SDK_PKG_DIR/" || true
+                COPIED=$(cp -v *.ipk "$SDK_PKG_DIR/" 2>&1 | wc -l)
+                echo "Copied $COPIED prebuilt package(s) (fallback)"
               else
                 mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
-                cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" || true
+                COPIED=$(cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" 2>&1 | wc -l)
+                echo "Copied $COPIED prebuilt package(s) (fallback)"
               fi
             else
               echo "Warning: Could not download prebuilt packages, will rely on compiled packages only"
@@ -246,10 +250,13 @@ jobs:
             exit 1
           fi
           
-          # 建议至少应该有 20+ 个依赖包（包括预编译包补充）
-          if [ "$DEP_COUNT" -lt 20 ]; then
-            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20 packages."
+          # 建议至少应该有 23 个依赖包（包括预编译包补充）
+          # 对于 x86_64 架构，标准配置应该有 23 个包
+          if [ "$DEP_COUNT" -lt 23 ]; then
+            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 23 packages."
             echo "This may indicate that some packages failed to compile and prebuilt packages were not downloaded successfully."
+            echo "Current packages:"
+            ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
           fi
 
           echo "Packages copied successfully:"

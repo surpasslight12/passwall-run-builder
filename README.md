@@ -74,7 +74,11 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 本项目生成的安装包包含以下依赖（20+ 个 IPK 文件）：
 
 - **核心代理工具**：xray-core, sing-box, v2ray-plugin, xray-plugin
-- **传输协议**：shadowsocks-rust (sslocal/ssserver), shadowsocksr-libev (ssr-local/ssr-redir/ssr-server), trojan-plus, hysteria, naiveproxy, tuic-client
+- **传输协议**：
+  - shadowsocks-libev (ss-local, ss-redir, ss-server)
+  - shadowsocks-rust (sslocal, ssserver)
+  - shadowsocksr-libev (ssr-local, ssr-redir, ssr-server)
+  - trojan-plus, hysteria, naiveproxy, tuic-client
 - **辅助工具**：chinadns-ng, dns2socks, ipt2socks, microsocks, simple-obfs-client, tcping, shadow-tls
 - **地理数据**：v2ray-geoip, v2ray-geosite, geoview
 
