@@ -35,6 +35,8 @@ jobs:
             libssl-dev wget python3 git ca-certificates makeself zstd
 
       - name: Build PassWall IPK with OpenWrt SDK
+        env:
+          TERM: xterm
         run: |
           set -e
           mkdir -p openwrt-sdk
