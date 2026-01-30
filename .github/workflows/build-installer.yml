@@ -95,7 +95,7 @@ jobs:
           
           if [ -n "${PASSWALL_LUCI_REF:-}" ]; then
             echo "Checking out PASSWALL_LUCI_REF: $PASSWALL_LUCI_REF"
-            git -C package/passwall-luci fetch --depth=1 origin "$PASSWALL_LUCI_REF"
+            git -C package/passwall-luci fetch --all --tags
             git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF"
           fi
           echo "[SUCCESS] PassWall sources configured"
@@ -355,6 +355,8 @@ jobs:
             PREBUILT_PKG=""
             BUILT_VER=""
             PREBUILT_VER=""
+            SELECTED=""
+            SOURCE=""
             
             for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.ipk; do
               if [ -e "$f" ]; then
@@ -419,7 +421,7 @@ jobs:
           
           echo ""
           echo "Main packages:"
-          find "$GITHUB_WORKSPACE/payload/" -maxdepth 1 -name "*.ipk" | xargs -n1 basename | sort | sed 's/^/  - /'
+          find "$GITHUB_WORKSPACE/payload/" -maxdepth 1 -name "*.ipk" | xargs -r -n1 basename | sort | sed 's/^/  - /'
           echo ""
           echo "Dependency packages (total: $DEP_COUNT):"
           ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort | sed 's/^/  - /'
