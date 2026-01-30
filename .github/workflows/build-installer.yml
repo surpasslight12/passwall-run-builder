@@ -124,24 +124,75 @@ jobs:
           # This prevents interactive menuconfig (mconf) from blocking the CI build
           yes '' | make defconfig
           
+          # Enable all passwall dependency packages in config
+          # These packages are optional and need to be explicitly enabled for compilation
+          cat >> .config << 'EOF'
+          CONFIG_PACKAGE_chinadns-ng=m
+          CONFIG_PACKAGE_dns2socks=m
+          CONFIG_PACKAGE_geoview=m
+          CONFIG_PACKAGE_hysteria=m
+          CONFIG_PACKAGE_ipt2socks=m
+          CONFIG_PACKAGE_microsocks=m
+          CONFIG_PACKAGE_naiveproxy=m
+          CONFIG_PACKAGE_shadow-tls=m
+          CONFIG_PACKAGE_shadowsocks-rust-sslocal=m
+          CONFIG_PACKAGE_shadowsocks-rust-ssserver=m
+          CONFIG_PACKAGE_shadowsocksr-libev-ssr-local=m
+          CONFIG_PACKAGE_shadowsocksr-libev-ssr-redir=m
+          CONFIG_PACKAGE_shadowsocksr-libev-ssr-server=m
+          CONFIG_PACKAGE_simple-obfs-client=m
+          CONFIG_PACKAGE_sing-box=m
+          CONFIG_PACKAGE_tcping=m
+          CONFIG_PACKAGE_trojan-plus=m
+          CONFIG_PACKAGE_tuic-client=m
+          CONFIG_PACKAGE_v2ray-geoip=m
+          CONFIG_PACKAGE_v2ray-geosite=m
+          CONFIG_PACKAGE_v2ray-plugin=m
+          CONFIG_PACKAGE_xray-core=m
+          CONFIG_PACKAGE_xray-plugin=m
+          EOF
+          yes '' | make defconfig
+          
           # Compile luci-base host tools (includes po2lmo for translation files)
           # This is now done AFTER defconfig to ensure .config exists
           # Note: lua and other dependencies will be automatically compiled when needed
           # by the OpenWrt build system's dependency resolution
           make package/feeds/luci/luci-base/host/compile V=s
           
-          # Compile luci-app-passwall and let make automatically build dependencies
-          # This replaces 20+ individual package compilation commands with one command
-          # that leverages OpenWrt's dependency resolution system
-          # 
-          # Dependencies compiled automatically include:
-          # - chinadns-ng, dns2socks, ipt2socks, microsocks, tcping
-          # - shadowsocks-libev, shadowsocks-rust, shadowsocksr-libev
-          # - xray-core, sing-box, v2ray-*, trojan-plus, hysteria, etc.
+          # Compile luci-app-passwall
           make package/luci-app-passwall/compile -j"$(nproc)" V=s || {
             echo "Parallel build failed, retrying with single thread for clearer error messages"
             make package/luci-app-passwall/compile V=s
           }
+          
+          # Compile all passwall dependency packages
+          # Build each package individually to ensure all dependencies are compiled
+          echo "Building passwall dependency packages..."
+          PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
+            shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
+            trojan-plus tuic-client v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
+          
+          for pkg in $PASSWALL_DEPS; do
+            echo "=== Building $pkg ==="
+            # Try to find the package location first (could be in package/passwall-packages or feeds)
+            PKG_PATH=""
+            if [ -d "package/passwall-packages/$pkg" ]; then
+              PKG_PATH="package/passwall-packages/$pkg"
+            elif [ -d "package/$pkg" ]; then
+              PKG_PATH="package/$pkg"
+            fi
+            
+            if [ -n "$PKG_PATH" ]; then
+              make "$PKG_PATH/compile" -j"$(nproc)" V=s 2>&1 || {
+                echo "Warning: Failed to compile $pkg with parallel build, trying single thread"
+                make "$PKG_PATH/compile" V=s 2>&1 || {
+                  echo "Warning: Failed to compile $pkg, will use prebuilt if available"
+                }
+              }
+            else
+              echo "Warning: Package $pkg not found in expected locations"
+            fi
+          done
           
           # Build the Chinese language pack (optional, non-critical)
           make package/luci-i18n-passwall-zh-cn/compile -j"$(nproc)" || true
@@ -173,7 +224,7 @@ jobs:
           fi
           echo "Target architecture: ${TARGET_ARCH}/${TARGET_SUBTARGET} -> Package arch: $ARCH_NAME"
 
-          # 下载官方最新的预编译依赖包
+          # 下载官方最新的预编译依赖包（用于补充编译失败的包或使用更新的版本）
           # 使用最新的稳定版本标签
           PASSWALL_RELEASE="26.1.13-1"
           echo "Downloading prebuilt packages from Passwall release $PASSWALL_RELEASE"
@@ -185,26 +236,13 @@ jobs:
           # 下载对应架构的预编译包
           PACKAGE_ZIP="passwall_packages_ipk_${ARCH_NAME}.zip"
           DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
+          PREBUILT_DOWNLOADED=false
           
           echo "Attempting to download: $DOWNLOAD_URL"
           if wget -q "$DOWNLOAD_URL"; then
             echo "Successfully downloaded $PACKAGE_ZIP"
             unzip -q "$PACKAGE_ZIP"
-            
-            # 将预编译包复制到 SDK 的 bin/packages 目录，这样 find 命令可以找到它们
-            # 检测 SDK 中的架构目录
-            SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
-            if [ -n "$SDK_PKG_DIR" ]; then
-              echo "Copying prebuilt packages to $SDK_PKG_DIR"
-              COPIED=$(cp -v *.ipk "$SDK_PKG_DIR/" 2>&1 | wc -l)
-              echo "Copied $COPIED prebuilt package(s)"
-            else
-              # 如果找不到目标目录，创建一个
-              mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
-              echo "Copying prebuilt packages to bin/packages/prebuilt/passwall_packages"
-              COPIED=$(cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" 2>&1 | wc -l)
-              echo "Copied $COPIED prebuilt package(s)"
-            fi
+            PREBUILT_DOWNLOADED=true
           else
             echo "Warning: Failed to download $PACKAGE_ZIP, will try with x86_64 as fallback architecture"
             # 尝试通用的 x86_64 包
@@ -213,15 +251,7 @@ jobs:
             if wget -q "$DOWNLOAD_URL"; then
               echo "Successfully downloaded $PACKAGE_ZIP (fallback)"
               unzip -q "$PACKAGE_ZIP"
-              SDK_PKG_DIR=$(find "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages" -type d -name "passwall_packages" | head -n1)
-              if [ -n "$SDK_PKG_DIR" ]; then
-                COPIED=$(cp -v *.ipk "$SDK_PKG_DIR/" 2>&1 | wc -l)
-                echo "Copied $COPIED prebuilt package(s) (fallback)"
-              else
-                mkdir -p "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages"
-                COPIED=$(cp -v *.ipk "$GITHUB_WORKSPACE/openwrt-sdk/bin/packages/prebuilt/passwall_packages/" 2>&1 | wc -l)
-                echo "Copied $COPIED prebuilt package(s) (fallback)"
-              fi
+              PREBUILT_DOWNLOADED=true
             else
               echo "Warning: Could not download prebuilt packages, will rely on compiled packages only"
             fi
@@ -229,80 +259,131 @@ jobs:
           
           cd "$GITHUB_WORKSPACE/openwrt-sdk"
 
-          # Create target directories
+          # Create target directories for built and prebuilt packages (separate for comparison)
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
+          mkdir -p "$GITHUB_WORKSPACE/built-packages" "$GITHUB_WORKSPACE/prebuilt-staging"
+          
+          # Copy prebuilt packages to staging area if downloaded
+          if [ "$PREBUILT_DOWNLOADED" = true ]; then
+            cp "$GITHUB_WORKSPACE/prebuilt-packages/"*.ipk "$GITHUB_WORKSPACE/prebuilt-staging/" 2>/dev/null || true
+            echo "Prebuilt packages in staging:"
+            ls -1 "$GITHUB_WORKSPACE/prebuilt-staging/" | head -30
+          fi
 
           # Copy compiled packages directly from bin/packages
           # This works regardless of architecture or feed directory structure
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
 
-          # 只拷贝与官方安装包一致的一组依赖 IPK
-          # 精确白名单（使用前缀匹配，允许版本号变化）：
-          #   chinadns-ng, dns2socks, geoview, hysteria, ipt2socks, microsocks, naiveproxy,
-          #   shadow-tls, shadowsocks-libev-ss-*, shadowsocks-rust-ss*, shadowsocksr-libev-ssr-*,
-          #   simple-obfs-client, sing-box, tcping, trojan-plus, tuic-client,
-          #   v2ray-geoip, v2ray-geosite, v2ray-plugin, xray-core, xray-plugin
-          find bin/packages -type f \( \
-              -name 'chinadns-ng_*.ipk' \
-           -o -name 'dns2socks_*.ipk' \
-           -o -name 'geoview_*.ipk' \
-           -o -name 'hysteria_*.ipk' \
-           -o -name 'ipt2socks_*.ipk' \
-           -o -name 'microsocks_*.ipk' \
-           -o -name 'naiveproxy_*.ipk' \
-           -o -name 'shadow-tls_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-local_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-redir_*.ipk' \
-           -o -name 'shadowsocks-libev-ss-server_*.ipk' \
-           -o -name 'shadowsocks-rust-sslocal_*.ipk' \
-           -o -name 'shadowsocks-rust-ssserver_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-local_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-redir_*.ipk' \
-           -o -name 'shadowsocksr-libev-ssr-server_*.ipk' \
-           -o -name 'simple-obfs-client_*.ipk' \
-           -o -name 'sing-box_*.ipk' \
-           -o -name 'tcping_*.ipk' \
-           -o -name 'trojan-plus_*.ipk' \
-           -o -name 'tuic-client_*.ipk' \
-           -o -name 'v2ray-geoip_*.ipk' \
-           -o -name 'v2ray-geosite_*.ipk' \
-           -o -name 'v2ray-plugin_*.ipk' \
-           -o -name 'xray-core_*.ipk' \
-           -o -name 'xray-plugin_*.ipk' \
-          \) -exec cp {} "$GITHUB_WORKSPACE/payload/depends/" \;
+          # Collect built dependency packages to a separate directory
+          echo "=== Collecting built packages ==="
+          # Binary package name prefixes for version comparison
+          # Format: package-name_version_arch.ipk (e.g., xray-core_25.12.8-r1_x86_64.ipk)
+          DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
+            shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
+            shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
+            shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server \
+            simple-obfs-client sing-box tcping trojan-plus tuic-client \
+            v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
+          
+          # Copy built packages matching the patterns to the built-packages directory
+          for pkg_name in $DEPENDENCY_PATTERNS; do
+            find bin/packages -type f -name "${pkg_name}_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
+          done
+          
+          echo "Built packages found:"
+          ls -1 "$GITHUB_WORKSPACE/built-packages/" 2>/dev/null | sort || echo "(none)"
+          BUILT_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.ipk" 2>/dev/null | wc -l)
+          echo "Built package count: $BUILT_COUNT"
 
-          # 去重：如果存在同一个包的多个版本，只保留版本号最高的那个
-          # 遍历每个包名前缀，检查是否有多个版本
-          cd "$GITHUB_WORKSPACE/payload/depends/"
-          for pkg_prefix in chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
-                            shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
-                            shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
-                            shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server \
-                            simple-obfs-client sing-box tcping trojan-plus tuic-client \
-                            v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin; do
-            # 查找该包的所有版本，使用数组避免解析 ls 输出
-            pkg_files=("${pkg_prefix}"_*.ipk)
-            # 检查是否真的找到了文件（globbing 失败时会返回模式本身）
-            if [ -e "${pkg_files[0]}" ]; then
-              # 计算有多少个版本
-              file_count=${#pkg_files[@]}
-              if [ "$file_count" -gt 1 ]; then
-                echo "Found multiple versions of $pkg_prefix:"
-                printf '%s\n' "${pkg_files[@]}"
-                # 按版本号排序，保留最新的（最后一个），删除其他的
-                # 使用 sort -V 进行版本号排序
-                latest=$(printf '%s\n' "${pkg_files[@]}" | sort -V | tail -n1)
-                echo "Keeping latest version: $latest"
-                for f in "${pkg_files[@]}"; do
-                  if [ "$f" != "$latest" ]; then
-                    echo "Removing older version: $f"
-                    rm -f "$f"
-                  fi
-                done
+          # Version comparison function
+          # Returns 0 if $1 version >= $2 version, otherwise returns 1
+          # Uses sort -V to find the highest version between two versions
+          compare_versions() {
+            local ver1="$1"
+            local ver2="$2"
+            local highest=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
+            [ "$ver1" = "$highest" ]
+          }
+          
+          # Extract version from IPK filename
+          # Expected format: package-name_version_arch.ipk (e.g., xray-core_25.12.8-r1_x86_64.ipk)
+          extract_version() {
+            local filename="$1"
+            filename=$(basename "$filename")
+            echo "$filename" | sed 's/^[^_]*_\([^_]*\)_.*/\1/'
+          }
+
+          echo ""
+          echo "=== Comparing built vs prebuilt packages ==="
+          echo "Package selection (newer version wins):"
+          echo "-------------------------------------------"
+          
+          # 遍历每个包名前缀，比较 built 和 prebuilt 版本
+          for pkg_prefix in $DEPENDENCY_PATTERNS; do
+            BUILT_PKG=""
+            PREBUILT_PKG=""
+            BUILT_VER=""
+            PREBUILT_VER=""
+            SELECTED=""
+            SOURCE=""
+            
+            # 查找 built 版本
+            for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.ipk; do
+              if [ -e "$f" ]; then
+                BUILT_PKG="$f"
+                BUILT_VER=$(extract_version "$f")
+                break
               fi
+            done
+            
+            # 查找 prebuilt 版本
+            for f in "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}_"*.ipk; do
+              if [ -e "$f" ]; then
+                PREBUILT_PKG="$f"
+                PREBUILT_VER=$(extract_version "$f")
+                break
+              fi
+            done
+            
+            # 决定使用哪个版本
+            if [ -n "$BUILT_PKG" ] && [ -n "$PREBUILT_PKG" ]; then
+              # 两个版本都存在，比较版本号
+              if compare_versions "$BUILT_VER" "$PREBUILT_VER"; then
+                SELECTED="$BUILT_PKG"
+                SOURCE="BUILT"
+                if [ "$BUILT_VER" = "$PREBUILT_VER" ]; then
+                  echo "  $pkg_prefix: $BUILT_VER (built = prebuilt, using BUILT)"
+                else
+                  echo "  $pkg_prefix: $BUILT_VER > $PREBUILT_VER (using BUILT)"
+                fi
+              else
+                SELECTED="$PREBUILT_PKG"
+                SOURCE="PREBUILT"
+                echo "  $pkg_prefix: $PREBUILT_VER > $BUILT_VER (using PREBUILT)"
+              fi
+            elif [ -n "$BUILT_PKG" ]; then
+              # 只有 built 版本
+              SELECTED="$BUILT_PKG"
+              SOURCE="BUILT"
+              echo "  $pkg_prefix: $BUILT_VER (BUILT only)"
+            elif [ -n "$PREBUILT_PKG" ]; then
+              # 只有 prebuilt 版本
+              SELECTED="$PREBUILT_PKG"
+              SOURCE="PREBUILT"
+              echo "  $pkg_prefix: $PREBUILT_VER (PREBUILT only)"
+            else
+              echo "  $pkg_prefix: NOT FOUND (neither built nor prebuilt)"
+              continue
+            fi
+            
+            # 复制选中的包到 payload/depends
+            if [ -n "$SELECTED" ]; then
+              cp "$SELECTED" "$GITHUB_WORKSPACE/payload/depends/"
             fi
           done
+          
+          echo "-------------------------------------------"
           cd "$GITHUB_WORKSPACE/openwrt-sdk"
 
           # 如果没有找到任何依赖，直接报错退出，避免生成只有主包没有依赖的安装器
@@ -312,19 +393,26 @@ jobs:
             exit 1
           fi
           
-          # 建议至少应该有 23 个依赖包（包括预编译包补充）
-          # 对于 x86_64 架构，标准配置应该有 23 个包
-          if [ "$DEP_COUNT" -lt 23 ]; then
-            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 23 packages."
-            echo "This may indicate that some packages failed to compile and prebuilt packages were not downloaded successfully."
+          # Expected minimum: 23 packages for a complete installation
+          # The list includes: chinadns-ng, dns2socks, geoview, hysteria, ipt2socks, microsocks,
+          # naiveproxy, shadow-tls, shadowsocks-rust (2), shadowsocksr-libev (3), simple-obfs-client,
+          # sing-box, tcping, trojan-plus, tuic-client, v2ray-geoip, v2ray-geosite, v2ray-plugin,
+          # xray-core, xray-plugin (total: 23)
+          # Note: shadowsocks-libev (3) packages may not be included in prebuilt releases
+          if [ "$DEP_COUNT" -lt 20 ]; then
+            echo "Warning: Only $DEP_COUNT dependency packages found. Expected at least 20-23 packages."
+            echo "Some packages may not be available in either built or prebuilt form."
             echo "Current packages:"
             ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
           fi
 
+          echo ""
+          echo "=== Final package summary ==="
           echo "Packages copied successfully:"
           ls -lh "$GITHUB_WORKSPACE/payload/"
-          echo "Dependencies count: $(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.ipk" | wc -l)"
-          echo "All dependencies found:"
+          echo ""
+          echo "Dependencies count: $DEP_COUNT"
+          echo "All dependencies:"
           ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort
 
       - name: Validate payload
