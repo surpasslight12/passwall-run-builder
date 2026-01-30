@@ -252,19 +252,20 @@ jobs:
                             shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server \
                             simple-obfs-client sing-box tcping trojan-plus tuic-client \
                             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin; do
-            # 查找该包的所有版本
-            pkg_files=$(ls ${pkg_prefix}_*.ipk 2>/dev/null || true)
-            if [ -n "$pkg_files" ]; then
+            # 查找该包的所有版本，使用数组避免解析 ls 输出
+            pkg_files=("${pkg_prefix}"_*.ipk)
+            # 检查是否真的找到了文件（globbing 失败时会返回模式本身）
+            if [ -e "${pkg_files[0]}" ]; then
               # 计算有多少个版本
-              file_count=$(echo "$pkg_files" | wc -w)
+              file_count=${#pkg_files[@]}
               if [ "$file_count" -gt 1 ]; then
                 echo "Found multiple versions of $pkg_prefix:"
-                echo "$pkg_files"
+                printf '%s\n' "${pkg_files[@]}"
                 # 按版本号排序，保留最新的（最后一个），删除其他的
                 # 使用 sort -V 进行版本号排序
-                latest=$(echo "$pkg_files" | tr ' ' '\n' | sort -V | tail -n1)
+                latest=$(printf '%s\n' "${pkg_files[@]}" | sort -V | tail -n1)
                 echo "Keeping latest version: $latest"
-                for f in $pkg_files; do
+                for f in "${pkg_files[@]}"; do
                   if [ "$f" != "$latest" ]; then
                     echo "Removing older version: $f"
                     rm -f "$f"
