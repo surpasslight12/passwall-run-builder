@@ -84,7 +84,8 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 
 这些依赖包通过以下方式获取：
 1. 优先尝试从源码编译（使用 OpenWrt SDK）
-2. 对于编译失败的包，自动从官方 PassWall 预编译版本下载补充
+2. 对于编译失败的包，自动从 SourceForge 上的官方 PassWall 预编译版本下载补充
+3. 作为最后的回退，尝试从 OpenWrt 官方发布源 (https://downloads.openwrt.org/releases/) 下载
 
 ## 常见问题 / FAQ
 
