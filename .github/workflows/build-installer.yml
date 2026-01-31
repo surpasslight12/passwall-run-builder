@@ -427,6 +427,71 @@ jobs:
             done
           fi
           
+          # Fallback 2: Try openwrt-passwall.mirror SourceForge for missing packages
+          # This project contains complete package archives organized by release version
+          STILL_MISSING=""
+          for pkg in $NEEDED_PACKAGES; do
+            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+              STILL_MISSING="$STILL_MISSING $pkg"
+            fi
+          done
+          
+          if [ -n "$STILL_MISSING" ]; then
+            echo ""
+            echo "=========================================="
+            echo "Trying openwrt-passwall.mirror for missing packages:$STILL_MISSING"
+            echo "=========================================="
+            
+            # Try to get the latest release version from openwrt-passwall.mirror
+            # The releases are organized as folders like 26.1.30-1, 26.1.25-1, etc.
+            # Try recent known release versions
+            RELEASE_VERSIONS="26.1.30-1 26.1.25-1 26.1.21-1 26.1.17-1 25.12.25-1"
+            
+            for SF_MIRROR in $SF_MIRRORS; do
+              echo "Checking openwrt-passwall.mirror on $SF_MIRROR..."
+              
+              for RELEASE_VER in $RELEASE_VERSIONS; do
+                # Try to download the complete packages zip for the architecture
+                ZIP_URL="https://${SF_MIRROR}/project/openwrt-passwall.mirror/${RELEASE_VER}/passwall_packages_ipk_${ARCH_NAME}.zip"
+                
+                echo "Trying: $ZIP_URL"
+                if wget -q --timeout=120 -O "packages.zip" "$ZIP_URL" 2>/dev/null && [ -s "packages.zip" ]; then
+                  echo "[SUCCESS] Downloaded package archive from release $RELEASE_VER"
+                  
+                  # Extract only the missing packages
+                  mkdir -p temp_extract
+                  if unzip -q -o packages.zip -d temp_extract 2>/dev/null; then
+                    echo "Extracting missing packages..."
+                    for pkg in $STILL_MISSING; do
+                      PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
+                      if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
+                        cp "$PKG_FILE" .
+                        echo "  [SUCCESS] Extracted $pkg from archive"
+                        PREBUILT_DOWNLOADED=true
+                      fi
+                    done
+                  fi
+                  rm -rf temp_extract packages.zip
+                  break 2
+                fi
+              done
+            done
+          fi
+          
+          # Final report on missing packages
+          FINAL_MISSING=""
+          for pkg in $NEEDED_PACKAGES; do
+            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+              FINAL_MISSING="$FINAL_MISSING $pkg"
+            fi
+          done
+          
+          if [ -n "$FINAL_MISSING" ]; then
+            echo ""
+            echo "[WARNING] Still missing packages after all fallbacks:$FINAL_MISSING"
+            echo "[INFO] These packages may not be available in any prebuilt repository"
+          fi
+          
           # Count downloaded packages
           PKG_COUNT=$(find . -name "*.ipk" 2>/dev/null | wc -l)
           echo ""
