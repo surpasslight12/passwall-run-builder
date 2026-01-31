@@ -110,7 +110,7 @@ jobs:
           ./scripts/feeds update -i
           
           echo "Installing language toolchains..."
-          ./scripts/feeds install golang rust lua lua-dev liblua
+          ./scripts/feeds install golang rust
           
           echo "Installing runtime dependencies..."
           ./scripts/feeds install \
