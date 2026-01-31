@@ -328,54 +328,103 @@ jobs:
           
           PREBUILT_DOWNLOADED=false
           
-          # Try SourceForge passwall-build repository
-          # The repository provides packages via an index that can be fetched
-          SOURCEFORGE_INDEX="https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/Packages"
+          # Packages that require newer Go/Rust toolchains that cannot be compiled with OpenWrt SDK 24.10
+          # These packages need prebuilt binaries because:
+          # - geoview, hysteria: require Go >= 1.24.0 (SDK has 1.23.12)
+          # - v2ray-plugin, xray-core: require Go >= 1.25+ (SDK has 1.23.12)
+          # - shadow-tls, shadowsocks-rust: require Rust toolchain that fails to build on CI
+          NEEDED_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-plugin xray-core"
           
-          echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
-          if wget -q --timeout=60 -O "Packages" "$SOURCEFORGE_INDEX" 2>/dev/null && [ -s "Packages" ]; then
-            echo "[SUCCESS] Downloaded package index from SourceForge"
+          # SourceForge mirror URLs for openwrt-passwall-build
+          SF_MIRRORS="master.dl.sourceforge.net downloads.sourceforge.net netcologne.dl.sourceforge.net netix.dl.sourceforge.net"
+          
+          # Try SourceForge passwall-build repository with multiple mirrors
+          for SF_MIRROR in $SF_MIRRORS; do
+            SOURCEFORGE_INDEX="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/Packages"
             
-            # Extract package URLs from the index and download needed packages
-            # Note: NEEDED_PACKAGES uses IPK package names (output names), while PASSWALL_DEPS uses directory names
-            # e.g., v2ray-geodata directory produces v2ray-geoip and v2ray-geosite IPK packages
-            # shadowsocks-libev produces shadowsocks-libev-ss-{local,redir,server} packages
-            # shadowsocks-rust produces shadowsocks-rust-ss{local,server} packages
-            NEEDED_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin tuic-client shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server"
-            
-            for pkg in $NEEDED_PACKAGES; do
-              # Extract filename from Packages index
-              PKG_FILE=$(grep -A 5 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
-              if [ -n "$PKG_FILE" ]; then
-                PKG_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
-                echo "Downloading: $pkg"
-                if wget -q --timeout=30 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null; then
-                  echo "  [SUCCESS] Downloaded $pkg"
-                  PREBUILT_DOWNLOADED=true
-                else
-                  echo "  [SKIPPED] Could not download $pkg"
+            echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
+            if wget -q --timeout=60 -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
+              # Check if the downloaded file is an actual Packages index (not HTML error page)
+              if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
+                mv "Packages.tmp" "Packages"
+                echo "[SUCCESS] Downloaded package index from SourceForge ($SF_MIRROR)"
+                echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
+                
+                for pkg in $NEEDED_PACKAGES; do
+                  # Extract filename from Packages index
+                  PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
+                  if [ -n "$PKG_FILE" ]; then
+                    PKG_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
+                    echo "Downloading: $pkg"
+                    if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                      echo "  [SUCCESS] Downloaded $pkg"
+                      PREBUILT_DOWNLOADED=true
+                    else
+                      echo "  [SKIPPED] Could not download $pkg from $SF_MIRROR"
+                    fi
+                  else
+                    echo "  [INFO] Package $pkg not found in index"
+                  fi
+                done
+                
+                # If we got packages, stop trying mirrors
+                if [ "$PREBUILT_DOWNLOADED" = "true" ]; then
+                  break
                 fi
+              else
+                echo "[INFO] Response from $SF_MIRROR is not a valid Packages index"
+                rm -f "Packages.tmp"
               fi
-            done
-          else
-            echo "[INFO] SourceForge package index not available"
-          fi
+            else
+              echo "[INFO] Could not reach $SF_MIRROR"
+            fi
+          done
           
-          # Fallback: try GitHub releases
+          # Fallback: try direct download of individual packages using known filename patterns
           if [ "$PREBUILT_DOWNLOADED" = "false" ]; then
             echo ""
-            echo "Trying GitHub releases..."
-            PASSWALL_RELEASE="26.1.30-1"
-            PACKAGE_ZIP="passwall_packages_ipk_${ARCH_NAME}.zip"
-            DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
+            echo "Trying direct package downloads..."
             
-            if wget -q --timeout=60 "$DOWNLOAD_URL" -O "$PACKAGE_ZIP" 2>/dev/null && [ -s "$PACKAGE_ZIP" ]; then
-              echo "[SUCCESS] Downloaded $PACKAGE_ZIP from GitHub"
-              unzip -q "$PACKAGE_ZIP" 2>/dev/null || true
-              PREBUILT_DOWNLOADED=true
-            else
-              echo "[INFO] GitHub release packages not available"
-            fi
+            # Known package patterns for x86_64 architecture
+            # These are common version patterns that might be available
+            DIRECT_PACKAGES="
+              geoview
+              hysteria
+              shadow-tls
+              shadowsocks-rust-sslocal
+              shadowsocks-rust-ssserver
+              v2ray-plugin
+              xray-core
+            "
+            
+            for SF_MIRROR in $SF_MIRRORS; do
+              echo "Trying mirror: $SF_MIRROR"
+              BASE_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages"
+              
+              for pkg in $DIRECT_PACKAGES; do
+                # Skip empty entries from multiline string
+                [ -z "$pkg" ] && continue
+                
+                # Skip if already downloaded
+                if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                  continue
+                fi
+                
+                # Try to get the package list page and find the package filename
+                PKG_FILENAME=$(wget -q --timeout=30 -O - "${BASE_URL}/" 2>/dev/null | grep -o "${pkg}_[^\"'<>]*\.ipk" | head -1)
+                if [ -n "$PKG_FILENAME" ]; then
+                  echo "Found: $PKG_FILENAME"
+                  if wget -q --timeout=60 -O "$PKG_FILENAME" "${BASE_URL}/${PKG_FILENAME}" 2>/dev/null && [ -s "$PKG_FILENAME" ]; then
+                    echo "  [SUCCESS] Downloaded $pkg"
+                    PREBUILT_DOWNLOADED=true
+                  fi
+                fi
+              done
+              
+              if [ "$PREBUILT_DOWNLOADED" = "true" ]; then
+                break
+              fi
+            done
           fi
           
           # Count downloaded packages
@@ -383,9 +432,16 @@ jobs:
           echo ""
           echo "Prebuilt packages downloaded: $PKG_COUNT"
           
+          if [ "$PKG_COUNT" -gt 0 ]; then
+            echo "Downloaded packages:"
+            ls -la *.ipk 2>/dev/null || true
+          fi
+          
           if [ "$PKG_COUNT" -eq 0 ]; then
             echo "[WARNING] No prebuilt packages could be downloaded"
-            echo "[INFO] Will rely on compiled packages only"
+            echo "[INFO] Some packages (geoview, hysteria, shadow-tls, shadowsocks-rust, v2ray-plugin, xray-core)"
+            echo "[INFO] require newer Go/Rust toolchains than provided by OpenWrt SDK 24.10"
+            echo "[INFO] These packages will be missing from the final installer"
           fi
           
           echo "PREBUILT_DOWNLOADED=$PREBUILT_DOWNLOADED" >> $GITHUB_ENV
@@ -492,6 +548,29 @@ jobs:
               cp "$SELECTED" "$GITHUB_WORKSPACE/payload/depends/"
             fi
           done
+          
+          echo ""
+          echo "=========================================="
+          echo "Package Collection Summary"
+          echo "=========================================="
+          MISSING_PKGS=""
+          for pkg_prefix in $DEPENDENCY_PATTERNS; do
+            if ! ls "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.ipk 1>/dev/null 2>&1; then
+              MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
+            fi
+          done
+          
+          if [ -n "$MISSING_PKGS" ]; then
+            echo "[WARNING] The following packages are MISSING and will not be in the installer:"
+            for pkg in $MISSING_PKGS; do
+              echo "  - $pkg"
+            done
+            echo ""
+            echo "[INFO] These packages likely require newer Go/Rust toolchains."
+            echo "[INFO] Consider downloading prebuilt packages from SourceForge or using a newer SDK."
+          else
+            echo "[SUCCESS] All dependency packages collected successfully!"
+          fi
 
       - name: Validate final packages
         run: |
@@ -507,8 +586,18 @@ jobs:
             exit 1
           fi
           
-          if [ "$DEP_COUNT" -lt 20 ]; then
-            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected 20-23)"
+          # Package count explanation:
+          # DEPENDENCY_PATTERNS lists 23 package patterns total.
+          # Up to 7 packages may be missing due to toolchain requirements:
+          #   - geoview, hysteria: require Go >= 1.24.0
+          #   - v2ray-plugin, xray-core: require Go >= 1.25+
+          #   - shadow-tls, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver: require Rust
+          # Minimum expected: 23 - 7 = 16 packages (without prebuilt downloads)
+          # With prebuilt packages: up to 23 packages
+          MIN_EXPECTED_PACKAGES=15
+          if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
+            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-23)"
+            echo "[INFO] Some packages require newer Go (>=1.24) or Rust toolchains not available in SDK 24.10"
           fi
           
           echo ""
