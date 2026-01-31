@@ -291,6 +291,8 @@ jobs:
           
           if [ "$TARGET_ARCH" = "x86" ] && [ "$TARGET_SUBTARGET" = "64" ]; then
             ARCH_NAME="x86_64"
+          elif [ "$TARGET_ARCH" = "x86" ] && [ "$TARGET_SUBTARGET" = "generic" ]; then
+            ARCH_NAME="x86_64"
           elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7621" ]; then
             ARCH_NAME="mipsel_24kc"
           elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7620" ]; then
