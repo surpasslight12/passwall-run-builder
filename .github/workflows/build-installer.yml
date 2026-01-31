@@ -311,16 +311,20 @@ jobs:
           echo "Package architecture: $ARCH_NAME"
           echo "ARCH_NAME=$ARCH_NAME" >> $GITHUB_ENV
           
-          # Detect SDK version from URL
+          # Detect SDK version from URL (with patch version, e.g., 24.10.5)
+          SDK_VERSION_FULL=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9]\+\.[0-9]\+\.[0-9]\+\).*#\1#p')
           SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9]\+\.[0-9]\+\).*#\1#p')
           if [ -z "$SDK_VERSION" ]; then
             SDK_VERSION="24.10"
           fi
-          echo "SDK Version: $SDK_VERSION"
+          if [ -z "$SDK_VERSION_FULL" ]; then
+            SDK_VERSION_FULL="$SDK_VERSION"
+          fi
+          echo "SDK Version: $SDK_VERSION (Full: $SDK_VERSION_FULL)"
           
           echo ""
           echo "=========================================="
-          echo "Attempting to download prebuilt packages"
+          echo "Downloading SDK dependency packages from OpenWrt official sources"
           echo "=========================================="
           
           mkdir -p prebuilt-packages
@@ -328,12 +332,65 @@ jobs:
           
           PREBUILT_DOWNLOADED=false
           
+          # SDK dependency packages - download from OpenWrt official sources
+          # These are runtime dependencies that should be bundled with the installer
+          SDK_DEPS="libev libsodium libudns libcares libpcre2 libmbedtls libopenssl"
+          
+          # Try official OpenWrt releases for SDK dependency packages
+          OPENWRT_SUBDIRS="packages base"
+          
+          for SUBDIR in $OPENWRT_SUBDIRS; do
+            OPENWRT_INDEX="https://downloads.openwrt.org/releases/${SDK_VERSION_FULL}/packages/${ARCH_NAME}/${SUBDIR}/Packages"
+            
+            echo "Trying OpenWrt official index: $OPENWRT_INDEX"
+            if wget -q --timeout=60 -O "Packages-openwrt-${SUBDIR}.tmp" "$OPENWRT_INDEX" 2>/dev/null; then
+              if [ -s "Packages-openwrt-${SUBDIR}.tmp" ] && grep -q "^Package:" "Packages-openwrt-${SUBDIR}.tmp" 2>/dev/null; then
+                mv "Packages-openwrt-${SUBDIR}.tmp" "Packages-openwrt-${SUBDIR}"
+                echo "[SUCCESS] Downloaded OpenWrt ${SDK_VERSION_FULL} ${SUBDIR} package index"
+                echo "[INFO] Index contains $(grep -c '^Package:' Packages-openwrt-${SUBDIR}) packages"
+                
+                for pkg in $SDK_DEPS; do
+                  # Skip if already downloaded
+                  if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                    continue
+                  fi
+                  
+                  # Extract filename from Packages index
+                  PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-openwrt-${SUBDIR} | grep "^Filename:" | head -1 | awk '{print $2}')
+                  if [ -n "$PKG_FILE" ]; then
+                    PKG_URL="https://downloads.openwrt.org/releases/${SDK_VERSION_FULL}/packages/${ARCH_NAME}/${SUBDIR}/${PKG_FILE}"
+                    echo "Downloading SDK dependency from OpenWrt official: $pkg"
+                    if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                      echo "  [SUCCESS] Downloaded $pkg from OpenWrt official"
+                      PREBUILT_DOWNLOADED=true
+                    else
+                      echo "  [FAILED] Could not download $pkg from OpenWrt official"
+                    fi
+                  fi
+                done
+                
+                rm -f Packages-openwrt-${SUBDIR}
+              else
+                echo "[INFO] Response is not a valid Packages index"
+                rm -f "Packages-openwrt-${SUBDIR}.tmp"
+              fi
+            else
+              echo "[INFO] Could not reach OpenWrt ${SDK_VERSION_FULL} ${SUBDIR} index"
+            fi
+          done
+          
+          echo ""
+          echo "=========================================="
+          echo "Downloading PassWall packages from SourceForge"
+          echo "=========================================="
+          
           # Packages that require newer Go/Rust toolchains that cannot be compiled with OpenWrt SDK 24.10
           # These packages need prebuilt binaries because:
           # - geoview, hysteria: require Go >= 1.24.0 (SDK has 1.23.12)
           # - v2ray-plugin, xray-core: require Go >= 1.25+ (SDK has 1.23.12)
           # - shadow-tls, shadowsocks-rust: require Rust toolchain that fails to build on CI
-          NEEDED_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-plugin xray-core"
+          # PassWall packages - download from SourceForge (old address)
+          PASSWALL_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-plugin xray-core"
           
           # SourceForge mirror URLs for openwrt-passwall-build
           SF_MIRRORS="master.dl.sourceforge.net downloads.sourceforge.net netcologne.dl.sourceforge.net netix.dl.sourceforge.net"
@@ -350,12 +407,12 @@ jobs:
                 echo "[SUCCESS] Downloaded package index from SourceForge ($SF_MIRROR)"
                 echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
                 
-                for pkg in $NEEDED_PACKAGES; do
+                for pkg in $PASSWALL_PACKAGES; do
                   # Extract filename from Packages index
                   PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
                   if [ -n "$PKG_FILE" ]; then
                     PKG_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
-                    echo "Downloading: $pkg"
+                    echo "Downloading PassWall package: $pkg"
                     if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
                       echo "  [SUCCESS] Downloaded $pkg"
                       PREBUILT_DOWNLOADED=true
@@ -440,10 +497,10 @@ jobs:
             done
           fi
           
-          # Fallback 2: Try openwrt-passwall.mirror SourceForge for missing packages
+          # Fallback 2: Try openwrt-passwall.mirror SourceForge for missing PassWall packages
           # This project contains complete package archives organized by release version
           STILL_MISSING=""
-          for pkg in $NEEDED_PACKAGES; do
+          for pkg in $PASSWALL_PACKAGES; do
             if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
               STILL_MISSING="$STILL_MISSING $pkg"
             fi
@@ -518,89 +575,9 @@ jobs:
             done
           fi
           
-          # Fallback 3: Try official OpenWrt releases repository for missing packages
-          # https://downloads.openwrt.org/releases/{SDK_VERSION}/packages/{ARCH_NAME}/packages/
-          OPENWRT_MISSING=""
-          for pkg in $NEEDED_PACKAGES; do
-            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-              OPENWRT_MISSING="$OPENWRT_MISSING $pkg"
-            fi
-          done
-          
-          if [ -n "$OPENWRT_MISSING" ]; then
-            echo ""
-            echo "=========================================="
-            echo "Trying official OpenWrt releases for missing packages:$OPENWRT_MISSING"
-            echo "=========================================="
-            
-            # Try multiple SDK versions for official OpenWrt packages
-            OPENWRT_VERSIONS="$SDK_VERSION 24.10 23.05"
-            # Remove duplicates while preserving order
-            OPENWRT_VERSIONS=$(echo "$OPENWRT_VERSIONS" | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ')
-            
-            for OPENWRT_VER in $OPENWRT_VERSIONS; do
-              # OpenWrt packages are organized in subdirectories: base, packages, luci, routing, telephony
-              OPENWRT_SUBDIRS="packages base"
-              
-              for SUBDIR in $OPENWRT_SUBDIRS; do
-                OPENWRT_INDEX="https://downloads.openwrt.org/releases/${OPENWRT_VER}/packages/${ARCH_NAME}/${SUBDIR}/Packages"
-                
-                echo "Trying OpenWrt official index: $OPENWRT_INDEX"
-                if wget -q --timeout=60 -O "Packages-openwrt.tmp" "$OPENWRT_INDEX" 2>/dev/null; then
-                  if [ -s "Packages-openwrt.tmp" ] && grep -q "^Package:" "Packages-openwrt.tmp" 2>/dev/null; then
-                    mv "Packages-openwrt.tmp" "Packages-openwrt"
-                    echo "[SUCCESS] Downloaded OpenWrt ${OPENWRT_VER} ${SUBDIR} package index"
-                    echo "[INFO] Index contains $(grep -c '^Package:' Packages-openwrt) packages"
-                    
-                    for pkg in $OPENWRT_MISSING; do
-                      # Skip if already downloaded
-                      if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-                        continue
-                      fi
-                      
-                      # Extract filename from Packages index
-                      PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-openwrt | grep "^Filename:" | head -1 | awk '{print $2}')
-                      if [ -n "$PKG_FILE" ]; then
-                        PKG_URL="https://downloads.openwrt.org/releases/${OPENWRT_VER}/packages/${ARCH_NAME}/${SUBDIR}/${PKG_FILE}"
-                        echo "Downloading from OpenWrt official: $pkg"
-                        if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
-                          echo "  [SUCCESS] Downloaded $pkg from OpenWrt releases"
-                          PREBUILT_DOWNLOADED=true
-                        else
-                          echo "  [FAILED] Could not download $pkg from OpenWrt releases"
-                        fi
-                      fi
-                    done
-                    
-                    rm -f Packages-openwrt
-                  else
-                    echo "[INFO] Response is not a valid Packages index"
-                    rm -f "Packages-openwrt.tmp"
-                  fi
-                else
-                  echo "[INFO] Could not reach OpenWrt ${OPENWRT_VER} ${SUBDIR} index"
-                fi
-              done
-              
-              # Check if we got all missing packages
-              ALL_OPENWRT_FOUND=true
-              for pkg in $OPENWRT_MISSING; do
-                if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-                  ALL_OPENWRT_FOUND=false
-                  break
-                fi
-              done
-              
-              if [ "$ALL_OPENWRT_FOUND" = "true" ]; then
-                echo "[SUCCESS] All missing packages found in OpenWrt releases $OPENWRT_VER"
-                break
-              fi
-            done
-          fi
-          
-          # Final report on missing packages
+          # Final report on missing PassWall packages
           FINAL_MISSING=""
-          for pkg in $NEEDED_PACKAGES; do
+          for pkg in $PASSWALL_PACKAGES; do
             if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
               FINAL_MISSING="$FINAL_MISSING $pkg"
             fi
@@ -650,12 +627,18 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           
-          DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
+          # SDK dependency packages (from OpenWrt official)
+          SDK_DEPENDENCY_PATTERNS="libev libsodium libudns libcares libpcre2 libmbedtls libopenssl"
+          
+          # PassWall-specific dependency packages
+          PASSWALL_DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
             shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server \
             simple-obfs-client sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
+          
+          DEPENDENCY_PATTERNS="$SDK_DEPENDENCY_PATTERNS $PASSWALL_DEPENDENCY_PATTERNS"
           
           for pkg_name in $DEPENDENCY_PATTERNS; do
             find bin/packages -type f -name "${pkg_name}_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
@@ -772,16 +755,19 @@ jobs:
           fi
           
           # Package count explanation:
-          # DEPENDENCY_PATTERNS lists 23 package patterns total.
-          # Up to 7 packages may be missing due to toolchain requirements:
+          # SDK_DEPENDENCY_PATTERNS lists 7 packages: libev, libsodium, libudns, libcares, libpcre2, libmbedtls, libopenssl
+          # PASSWALL_DEPENDENCY_PATTERNS lists 23 package patterns.
+          # Total: 30 package patterns.
+          # Up to 7 PassWall packages may be missing due to toolchain requirements:
           #   - geoview, hysteria: require Go >= 1.24.0
           #   - v2ray-plugin, xray-core: require Go >= 1.25+
           #   - shadow-tls, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver: require Rust
-          # Minimum expected: 23 - 7 = 16 packages (without prebuilt downloads)
-          # With prebuilt packages: up to 23 packages
+          # SDK deps are downloaded from OpenWrt official, PassWall packages from SourceForge
+          # Minimum expected: ~20 packages (without some prebuilt downloads)
+          # With all prebuilt packages: up to 30 packages
           MIN_EXPECTED_PACKAGES=15
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
-            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-23)"
+            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-30)"
             echo "[INFO] Some packages require newer Go (>=1.24) or Rust toolchains not available in SDK 24.10"
           fi
           
