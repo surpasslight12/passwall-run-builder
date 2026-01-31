@@ -460,7 +460,6 @@ jobs:
             # Updated list based on actual available releases on SourceForge
             RELEASE_VERSIONS="26.1.17-1 25.12.25-1 26.1.1-1 25.12.22-1 25.12.15-1"
             
-            MIRROR_SUCCESS=false
             for SF_MIRROR in $SF_MIRRORS; do
               echo "Checking openwrt-passwall.mirror on $SF_MIRROR..."
               
@@ -469,61 +468,54 @@ jobs:
                 ZIP_URL="https://${SF_MIRROR}/project/openwrt-passwall.mirror/${RELEASE_VER}/passwall_packages_ipk_${ARCH_NAME}.zip"
                 
                 echo "  Trying: $ZIP_URL"
-                if wget --timeout=120 -O "packages.zip" "$ZIP_URL" 2>&1 | head -5; then
-                  if [ -s "packages.zip" ] && file packages.zip | grep -q "Zip archive"; then
-                    echo "  [SUCCESS] Downloaded package archive from release $RELEASE_VER"
-                    
-                    # Extract only the missing packages
-                    mkdir -p temp_extract
-                    if unzip -q -o packages.zip -d temp_extract 2>/dev/null; then
-                      echo "  Extracting missing packages..."
-                      for pkg in $STILL_MISSING; do
-                        # Skip if already downloaded
-                        if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-                          continue
-                        fi
-                        PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
-                        if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
-                          cp "$PKG_FILE" .
-                          echo "    [SUCCESS] Extracted $pkg from archive"
-                          PREBUILT_DOWNLOADED=true
-                          MIRROR_SUCCESS=true
-                        else
-                          echo "    [INFO] Package $pkg not found in archive"
-                        fi
-                      done
-                    else
-                      echo "  [ERROR] Failed to extract packages.zip"
-                    fi
-                    rm -rf temp_extract packages.zip
-                    
-                    # Check if we got all missing packages
-                    ALL_FOUND=true
+                # Download with timeout and capture exit status properly
+                wget --timeout=120 -O "packages.zip" "$ZIP_URL" 2>&1 | head -10 || true
+                
+                if [ -s "packages.zip" ] && file packages.zip | grep -q "Zip archive"; then
+                  echo "  [SUCCESS] Downloaded package archive from release $RELEASE_VER"
+                  
+                  # Extract only the missing packages
+                  mkdir -p temp_extract
+                  if unzip -q -o packages.zip -d temp_extract 2>/dev/null; then
+                    echo "  Extracting missing packages..."
                     for pkg in $STILL_MISSING; do
-                      if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-                        ALL_FOUND=false
-                        break
+                      # Skip if already downloaded
+                      if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                        continue
+                      fi
+                      PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
+                      if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
+                        cp "$PKG_FILE" .
+                        echo "    [SUCCESS] Extracted $pkg from archive"
+                        PREBUILT_DOWNLOADED=true
+                      else
+                        echo "    [INFO] Package $pkg not found in archive"
                       fi
                     done
-                    
-                    if [ "$ALL_FOUND" = "true" ]; then
-                      echo "  [SUCCESS] All missing packages found in $RELEASE_VER"
-                      break 2
-                    fi
                   else
-                    echo "  [INFO] Downloaded file is not a valid zip archive, trying next version..."
-                    rm -f packages.zip
+                    echo "  [ERROR] Failed to extract packages.zip"
+                  fi
+                  rm -rf temp_extract packages.zip
+                  
+                  # Check if we got all missing packages
+                  ALL_FOUND=true
+                  for pkg in $STILL_MISSING; do
+                    if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                      ALL_FOUND=false
+                      break
+                    fi
+                  done
+                  
+                  if [ "$ALL_FOUND" = "true" ]; then
+                    echo "  [SUCCESS] All missing packages found in $RELEASE_VER"
+                    break 2
                   fi
                 else
-                  echo "  [INFO] Could not download from $RELEASE_VER"
+                  echo "  [INFO] Downloaded file is not a valid zip archive, trying next version..."
                   rm -f packages.zip
                 fi
               done
             done
-            
-            if [ "$MIRROR_SUCCESS" = "false" ]; then
-              echo "[WARNING] openwrt-passwall.mirror fallback did not find additional packages"
-            fi
           fi
           
           # Final report on missing packages
