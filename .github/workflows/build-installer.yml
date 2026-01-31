@@ -518,6 +518,86 @@ jobs:
             done
           fi
           
+          # Fallback 3: Try official OpenWrt releases repository for missing packages
+          # https://downloads.openwrt.org/releases/{SDK_VERSION}/packages/{ARCH_NAME}/packages/
+          OPENWRT_MISSING=""
+          for pkg in $NEEDED_PACKAGES; do
+            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+              OPENWRT_MISSING="$OPENWRT_MISSING $pkg"
+            fi
+          done
+          
+          if [ -n "$OPENWRT_MISSING" ]; then
+            echo ""
+            echo "=========================================="
+            echo "Trying official OpenWrt releases for missing packages:$OPENWRT_MISSING"
+            echo "=========================================="
+            
+            # Try multiple SDK versions for official OpenWrt packages
+            OPENWRT_VERSIONS="$SDK_VERSION 24.10 23.05"
+            # Remove duplicates while preserving order
+            OPENWRT_VERSIONS=$(echo "$OPENWRT_VERSIONS" | tr ' ' '\n' | awk '!seen[$0]++' | tr '\n' ' ')
+            
+            for OPENWRT_VER in $OPENWRT_VERSIONS; do
+              # OpenWrt packages are organized in subdirectories: base, packages, luci, routing, telephony
+              OPENWRT_SUBDIRS="packages base"
+              
+              for SUBDIR in $OPENWRT_SUBDIRS; do
+                OPENWRT_INDEX="https://downloads.openwrt.org/releases/${OPENWRT_VER}/packages/${ARCH_NAME}/${SUBDIR}/Packages"
+                
+                echo "Trying OpenWrt official index: $OPENWRT_INDEX"
+                if wget -q --timeout=60 -O "Packages-openwrt.tmp" "$OPENWRT_INDEX" 2>/dev/null; then
+                  if [ -s "Packages-openwrt.tmp" ] && grep -q "^Package:" "Packages-openwrt.tmp" 2>/dev/null; then
+                    mv "Packages-openwrt.tmp" "Packages-openwrt"
+                    echo "[SUCCESS] Downloaded OpenWrt ${OPENWRT_VER} ${SUBDIR} package index"
+                    echo "[INFO] Index contains $(grep -c '^Package:' Packages-openwrt) packages"
+                    
+                    for pkg in $OPENWRT_MISSING; do
+                      # Skip if already downloaded
+                      if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                        continue
+                      fi
+                      
+                      # Extract filename from Packages index
+                      PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-openwrt | grep "^Filename:" | head -1 | awk '{print $2}')
+                      if [ -n "$PKG_FILE" ]; then
+                        PKG_URL="https://downloads.openwrt.org/releases/${OPENWRT_VER}/packages/${ARCH_NAME}/${SUBDIR}/${PKG_FILE}"
+                        echo "Downloading from OpenWrt official: $pkg"
+                        if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                          echo "  [SUCCESS] Downloaded $pkg from OpenWrt releases"
+                          PREBUILT_DOWNLOADED=true
+                        else
+                          echo "  [FAILED] Could not download $pkg from OpenWrt releases"
+                        fi
+                      fi
+                    done
+                    
+                    rm -f Packages-openwrt
+                  else
+                    echo "[INFO] Response is not a valid Packages index"
+                    rm -f "Packages-openwrt.tmp"
+                  fi
+                else
+                  echo "[INFO] Could not reach OpenWrt ${OPENWRT_VER} ${SUBDIR} index"
+                fi
+              done
+              
+              # Check if we got all missing packages
+              ALL_OPENWRT_FOUND=true
+              for pkg in $OPENWRT_MISSING; do
+                if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                  ALL_OPENWRT_FOUND=false
+                  break
+                fi
+              done
+              
+              if [ "$ALL_OPENWRT_FOUND" = "true" ]; then
+                echo "[SUCCESS] All missing packages found in OpenWrt releases $OPENWRT_VER"
+                break
+              fi
+            done
+          fi
+          
           # Final report on missing packages
           FINAL_MISSING=""
           for pkg in $NEEDED_PACKAGES; do
