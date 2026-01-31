@@ -1,7 +1,7 @@
 #!/bin/sh
 
 pw_ver=`ls | grep luci-app | awk -F'[_]' '{print $2}'`
-pwzh_ver=`ls | grep luci-i18n | awk -F'[_-]' '{print $6}'`
+pwzh_ver=`ls | grep luci-i18n | awk -F'[_]' '{print $2}'`
 
 opkg update
 if [ $? -ne 0 ]; then
