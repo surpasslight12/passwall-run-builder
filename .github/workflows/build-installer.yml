@@ -402,7 +402,7 @@ jobs:
               BASE_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages"
               
               for pkg in $DIRECT_PACKAGES; do
-                pkg=$(echo "$pkg" | tr -d ' ')
+                # Skip empty entries from multiline string
                 [ -z "$pkg" ] && continue
                 
                 # Skip if already downloaded
@@ -410,15 +410,13 @@ jobs:
                   continue
                 fi
                 
-                # Try to get the package list page and find the package
-                if wget -q --timeout=30 -O - "${BASE_URL}/" 2>/dev/null | grep -o "${pkg}_[^\"'<>]*\.ipk" | head -1 > /tmp/pkg_name_${pkg}; then
-                  PKG_FILENAME=$(cat /tmp/pkg_name_${pkg})
-                  if [ -n "$PKG_FILENAME" ]; then
-                    echo "Found: $PKG_FILENAME"
-                    if wget -q --timeout=60 -O "$PKG_FILENAME" "${BASE_URL}/${PKG_FILENAME}" 2>/dev/null && [ -s "$PKG_FILENAME" ]; then
-                      echo "  [SUCCESS] Downloaded $pkg"
-                      PREBUILT_DOWNLOADED=true
-                    fi
+                # Try to get the package list page and find the package filename
+                PKG_FILENAME=$(wget -q --timeout=30 -O - "${BASE_URL}/" 2>/dev/null | grep -o "${pkg}_[^\"'<>]*\.ipk" | head -1)
+                if [ -n "$PKG_FILENAME" ]; then
+                  echo "Found: $PKG_FILENAME"
+                  if wget -q --timeout=60 -O "$PKG_FILENAME" "${BASE_URL}/${PKG_FILENAME}" 2>/dev/null && [ -s "$PKG_FILENAME" ]; then
+                    echo "  [SUCCESS] Downloaded $pkg"
+                    PREBUILT_DOWNLOADED=true
                   fi
                 fi
               done
@@ -588,11 +586,17 @@ jobs:
             exit 1
           fi
           
-          # Note: Some packages (geoview, hysteria, shadow-tls, shadowsocks-rust, v2ray-plugin, xray-core)
-          # may be missing due to Go/Rust toolchain version requirements exceeding OpenWrt SDK 24.10 capabilities.
-          # Expected count is 16-23 packages depending on prebuilt availability.
-          if [ "$DEP_COUNT" -lt 15 ]; then
-            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected 15-23)"
+          # Package count explanation:
+          # DEPENDENCY_PATTERNS lists 23 package patterns total.
+          # Up to 7 packages may be missing due to toolchain requirements:
+          #   - geoview, hysteria: require Go >= 1.24.0
+          #   - v2ray-plugin, xray-core: require Go >= 1.25+
+          #   - shadow-tls, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver: require Rust
+          # Minimum expected: 23 - 7 = 16 packages (without prebuilt downloads)
+          # With prebuilt packages: up to 23 packages
+          MIN_EXPECTED_PACKAGES=15
+          if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
+            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-23)"
             echo "[INFO] Some packages require newer Go (>=1.24) or Rust toolchains not available in SDK 24.10"
           fi
           
