@@ -380,49 +380,62 @@ jobs:
             fi
           done
           
-          # Fallback: try direct download of individual packages using known filename patterns
-          if [ "$PREBUILT_DOWNLOADED" = "false" ]; then
+          # Fallback 1: Try packages-25.12 for missing Rust packages (shadow-tls, shadowsocks-rust)
+          # These packages are often available in newer SDK versions even when not in older ones
+          RUST_PACKAGES="shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver"
+          RUST_MISSING=""
+          for pkg in $RUST_PACKAGES; do
+            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+              RUST_MISSING="$RUST_MISSING $pkg"
+            fi
+          done
+          
+          if [ -n "$RUST_MISSING" ]; then
             echo ""
-            echo "Trying direct package downloads..."
-            
-            # Known package patterns for x86_64 architecture
-            # These are common version patterns that might be available
-            DIRECT_PACKAGES="
-              geoview
-              hysteria
-              shadow-tls
-              shadowsocks-rust-sslocal
-              shadowsocks-rust-ssserver
-              v2ray-plugin
-              xray-core
-            "
+            echo "=========================================="
+            echo "Trying packages-25.12 for Rust packages:$RUST_MISSING"
+            echo "=========================================="
             
             for SF_MIRROR in $SF_MIRRORS; do
-              echo "Trying mirror: $SF_MIRROR"
-              BASE_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages"
+              SOURCEFORGE_INDEX_25="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-25.12/${ARCH_NAME}/passwall_packages/Packages"
               
-              for pkg in $DIRECT_PACKAGES; do
-                # Skip empty entries from multiline string
-                [ -z "$pkg" ] && continue
-                
-                # Skip if already downloaded
-                if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
-                  continue
+              echo "Trying SourceForge packages-25.12 index: $SOURCEFORGE_INDEX_25"
+              if wget -q --timeout=60 -O "Packages-25.tmp" "$SOURCEFORGE_INDEX_25" 2>/dev/null; then
+                if [ -s "Packages-25.tmp" ] && grep -q "^Package:" "Packages-25.tmp" 2>/dev/null; then
+                  mv "Packages-25.tmp" "Packages-25"
+                  echo "[SUCCESS] Downloaded packages-25.12 index from SourceForge ($SF_MIRROR)"
+                  echo "[INFO] Packages-25.12 index contains $(grep -c '^Package:' Packages-25) packages"
+                  
+                  for pkg in $RUST_MISSING; do
+                    # Skip if already downloaded
+                    if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                      continue
+                    fi
+                    
+                    # Extract filename from Packages index
+                    PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-25 | grep "^Filename:" | head -1 | awk '{print $2}')
+                    if [ -n "$PKG_FILE" ]; then
+                      PKG_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-25.12/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
+                      echo "Downloading from packages-25.12: $pkg"
+                      if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                        echo "  [SUCCESS] Downloaded $pkg from packages-25.12"
+                        PREBUILT_DOWNLOADED=true
+                      else
+                        echo "  [FAILED] Could not download $pkg from packages-25.12"
+                      fi
+                    else
+                      echo "  [INFO] Package $pkg not found in packages-25.12 index"
+                    fi
+                  done
+                  
+                  rm -f Packages-25
+                  break
+                else
+                  echo "[INFO] Response from $SF_MIRROR for packages-25.12 is not a valid Packages index"
+                  rm -f "Packages-25.tmp"
                 fi
-                
-                # Try to get the package list page and find the package filename
-                PKG_FILENAME=$(wget -q --timeout=30 -O - "${BASE_URL}/" 2>/dev/null | grep -o "${pkg}_[^\"'<>]*\.ipk" | head -1)
-                if [ -n "$PKG_FILENAME" ]; then
-                  echo "Found: $PKG_FILENAME"
-                  if wget -q --timeout=60 -O "$PKG_FILENAME" "${BASE_URL}/${PKG_FILENAME}" 2>/dev/null && [ -s "$PKG_FILENAME" ]; then
-                    echo "  [SUCCESS] Downloaded $pkg"
-                    PREBUILT_DOWNLOADED=true
-                  fi
-                fi
-              done
-              
-              if [ "$PREBUILT_DOWNLOADED" = "true" ]; then
-                break
+              else
+                echo "[INFO] Could not reach $SF_MIRROR for packages-25.12"
               fi
             done
           fi
@@ -443,9 +456,9 @@ jobs:
             echo "=========================================="
             
             # Try to get the latest release version from openwrt-passwall.mirror
-            # The releases are organized as folders like 26.1.30-1, 26.1.25-1, etc.
-            # Try recent known release versions
-            RELEASE_VERSIONS="26.1.30-1 26.1.25-1 26.1.21-1 26.1.17-1 25.12.25-1"
+            # The releases are organized as folders like 26.1.17-1, 25.12.25-1, etc.
+            # Updated list based on actual available releases on SourceForge
+            RELEASE_VERSIONS="26.1.17-1 25.12.25-1 26.1.1-1 25.12.22-1 25.12.15-1"
             
             for SF_MIRROR in $SF_MIRRORS; do
               echo "Checking openwrt-passwall.mirror on $SF_MIRROR..."
@@ -454,25 +467,52 @@ jobs:
                 # Try to download the complete packages zip for the architecture
                 ZIP_URL="https://${SF_MIRROR}/project/openwrt-passwall.mirror/${RELEASE_VER}/passwall_packages_ipk_${ARCH_NAME}.zip"
                 
-                echo "Trying: $ZIP_URL"
-                if wget -q --timeout=120 -O "packages.zip" "$ZIP_URL" 2>/dev/null && [ -s "packages.zip" ]; then
-                  echo "[SUCCESS] Downloaded package archive from release $RELEASE_VER"
+                echo "  Trying: $ZIP_URL"
+                # Download with timeout and capture exit status properly
+                wget --timeout=120 -O "packages.zip" "$ZIP_URL" 2>&1 | head -10 || true
+                
+                if [ -s "packages.zip" ] && file packages.zip | grep -q "Zip archive"; then
+                  echo "  [SUCCESS] Downloaded package archive from release $RELEASE_VER"
                   
                   # Extract only the missing packages
                   mkdir -p temp_extract
                   if unzip -q -o packages.zip -d temp_extract 2>/dev/null; then
-                    echo "Extracting missing packages..."
+                    echo "  Extracting missing packages..."
                     for pkg in $STILL_MISSING; do
+                      # Skip if already downloaded
+                      if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                        continue
+                      fi
                       PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
                       if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
                         cp "$PKG_FILE" .
-                        echo "  [SUCCESS] Extracted $pkg from archive"
+                        echo "    [SUCCESS] Extracted $pkg from archive"
                         PREBUILT_DOWNLOADED=true
+                      else
+                        echo "    [INFO] Package $pkg not found in archive"
                       fi
                     done
+                  else
+                    echo "  [ERROR] Failed to extract packages.zip"
                   fi
                   rm -rf temp_extract packages.zip
-                  break 2
+                  
+                  # Check if we got all missing packages
+                  ALL_FOUND=true
+                  for pkg in $STILL_MISSING; do
+                    if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                      ALL_FOUND=false
+                      break
+                    fi
+                  done
+                  
+                  if [ "$ALL_FOUND" = "true" ]; then
+                    echo "  [SUCCESS] All missing packages found in $RELEASE_VER"
+                    break 2
+                  fi
+                else
+                  echo "  [INFO] Downloaded file is not a valid zip archive, trying next version..."
+                  rm -f packages.zip
                 fi
               done
             done
