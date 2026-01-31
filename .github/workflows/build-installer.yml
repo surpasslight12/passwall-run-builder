@@ -338,6 +338,7 @@ jobs:
           # - geoview, hysteria: require Go >= 1.24.0 (SDK has 1.23.12)
           # - v2ray-plugin, xray-core: require Go >= 1.25+ (SDK has 1.23.12)
           # - shadow-tls, shadowsocks-rust: require Rust toolchain that fails to build on CI
+          # Note: shadowsocks-libev and shadowsocksr-libev variants are compiled from SDK, not downloaded
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
             simple-obfs sing-box tcping trojan-plus tuic-client \
@@ -655,6 +656,9 @@ jobs:
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           
           # PassWall dependency packages (downloaded from OpenWrt official or SourceForge fallback)
+          # Note: PASSWALL_DEPS (prebuilt download list) contains packages that may need prebuilt binaries
+          # DEPENDENCY_PATTERNS includes additional shadowsocks-libev and shadowsocksr-libev variants
+          # that are compiled from SDK source, not downloaded as prebuilt packages
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
@@ -783,7 +787,7 @@ jobs:
           #   - v2ray-plugin, xray-core: require Go >= 1.25+
           #   - shadow-tls, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver: require Rust
           # Dependency packages are downloaded from OpenWrt official first, then SourceForge fallback
-          # Minimum expected: 16 packages (without some prebuilt downloads)
+          # Minimum expected: 15 packages (23 - 7 missing + some SDK compiled)
           # With all prebuilt packages: up to 23 packages
           MIN_EXPECTED_PACKAGES=15
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
