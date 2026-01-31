@@ -361,7 +361,7 @@ jobs:
                 
                 for pkg in $PASSWALL_DEPS; do
                   # Skip if already downloaded
-                  if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                  if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                     continue
                   fi
                   
@@ -397,7 +397,7 @@ jobs:
           # Check which packages are still missing after trying OpenWrt official
           MISSING_DEPS=""
           for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
               MISSING_DEPS="$MISSING_DEPS $pkg"
             fi
           done
@@ -426,7 +426,7 @@ jobs:
                   
                   for pkg in $MISSING_DEPS; do
                     # Skip if already downloaded
-                    if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                    if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                       continue
                     fi
                     # Extract filename from Packages index
@@ -448,7 +448,7 @@ jobs:
                   # Check if we still have missing packages
                   STILL_MISSING=""
                   for pkg in $MISSING_DEPS; do
-                    if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                    if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                       STILL_MISSING="$STILL_MISSING $pkg"
                     fi
                   done
@@ -472,7 +472,7 @@ jobs:
           RUST_PACKAGES="shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver"
           RUST_MISSING=""
           for pkg in $RUST_PACKAGES; do
-            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
               RUST_MISSING="$RUST_MISSING $pkg"
             fi
           done
@@ -495,7 +495,7 @@ jobs:
                   
                   for pkg in $RUST_MISSING; do
                     # Skip if already downloaded
-                    if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                    if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                       continue
                     fi
                     
@@ -531,7 +531,7 @@ jobs:
           # This project contains complete package archives organized by release version
           STILL_MISSING=""
           for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
               STILL_MISSING="$STILL_MISSING $pkg"
             fi
           done
@@ -567,7 +567,7 @@ jobs:
                     echo "  Extracting missing packages..."
                     for pkg in $STILL_MISSING; do
                       # Skip if already downloaded
-                      if ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                      if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                         continue
                       fi
                       PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
@@ -587,7 +587,7 @@ jobs:
                   # Check if we got all missing packages
                   ALL_FOUND=true
                   for pkg in $STILL_MISSING; do
-                    if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+                    if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
                       ALL_FOUND=false
                       break
                     fi
@@ -608,7 +608,7 @@ jobs:
           # Final report on missing PassWall dependency packages
           FINAL_MISSING=""
           for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.ipk 2>/dev/null | head -1 > /dev/null; then
+            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
               FINAL_MISSING="$FINAL_MISSING $pkg"
             fi
           done
