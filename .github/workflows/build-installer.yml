@@ -249,8 +249,8 @@ jobs:
           echo "=========================================="
           
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
-            shadow-tls shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
-            trojan-plus tuic-client v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
+            shadow-tls shadowsocks-libev shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
+            trojan-plus tuic-client v2ray-geodata v2ray-plugin xray-core xray-plugin"
           
           for pkg in $PASSWALL_DEPS; do
             echo ""
@@ -311,37 +311,81 @@ jobs:
           echo "Package architecture: $ARCH_NAME"
           echo "ARCH_NAME=$ARCH_NAME" >> $GITHUB_ENV
           
-          PASSWALL_RELEASE="26.1.30-1"
+          # Detect SDK version from URL
+          SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9]\+\.[0-9]\+\).*#\1#p')
+          if [ -z "$SDK_VERSION" ]; then
+            SDK_VERSION="24.10"
+          fi
+          echo "SDK Version: $SDK_VERSION"
+          
           echo ""
           echo "=========================================="
-          echo "Downloading prebuilt packages"
+          echo "Attempting to download prebuilt packages"
           echo "=========================================="
-          echo "Release version: $PASSWALL_RELEASE"
           
           mkdir -p prebuilt-packages
           cd prebuilt-packages
           
-          PACKAGE_ZIP="passwall_packages_ipk_${ARCH_NAME}.zip"
-          DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
           PREBUILT_DOWNLOADED=false
           
-          echo "Download URL: $DOWNLOAD_URL"
-          if wget -q "$DOWNLOAD_URL"; then
-            echo "[SUCCESS] Downloaded $PACKAGE_ZIP"
-            unzip -q "$PACKAGE_ZIP"
-            PREBUILT_DOWNLOADED=true
+          # Try SourceForge passwall-build repository
+          # The repository provides packages via an index that can be fetched
+          SOURCEFORGE_INDEX="https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/Packages"
+          
+          echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
+          if wget -q --timeout=60 -O "Packages" "$SOURCEFORGE_INDEX" 2>/dev/null && [ -s "Packages" ]; then
+            echo "[SUCCESS] Downloaded package index from SourceForge"
+            
+            # Extract package URLs from the index and download needed packages
+            # Note: NEEDED_PACKAGES uses IPK package names (output names), while PASSWALL_DEPS uses directory names
+            # e.g., v2ray-geodata directory produces v2ray-geoip and v2ray-geosite IPK packages
+            # shadowsocks-libev produces shadowsocks-libev-ss-{local,redir,server} packages
+            # shadowsocks-rust produces shadowsocks-rust-ss{local,server} packages
+            NEEDED_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin tuic-client shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server"
+            
+            for pkg in $NEEDED_PACKAGES; do
+              # Extract filename from Packages index
+              PKG_FILE=$(grep -A 5 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
+              if [ -n "$PKG_FILE" ]; then
+                PKG_URL="https://master.dl.sourceforge.net/project/openwrt-passwall-build/releases/packages-${SDK_VERSION}/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
+                echo "Downloading: $pkg"
+                if wget -q --timeout=30 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null; then
+                  echo "  [SUCCESS] Downloaded $pkg"
+                  PREBUILT_DOWNLOADED=true
+                else
+                  echo "  [SKIPPED] Could not download $pkg"
+                fi
+              fi
+            done
           else
-            echo "[WARNING] Failed to download $PACKAGE_ZIP"
-            echo "Trying fallback architecture: x86_64"
-            PACKAGE_ZIP="passwall_packages_ipk_x86_64.zip"
+            echo "[INFO] SourceForge package index not available"
+          fi
+          
+          # Fallback: try GitHub releases
+          if [ "$PREBUILT_DOWNLOADED" = "false" ]; then
+            echo ""
+            echo "Trying GitHub releases..."
+            PASSWALL_RELEASE="26.1.30-1"
+            PACKAGE_ZIP="passwall_packages_ipk_${ARCH_NAME}.zip"
             DOWNLOAD_URL="https://github.com/Openwrt-Passwall/openwrt-passwall/releases/download/${PASSWALL_RELEASE}/${PACKAGE_ZIP}"
-            if wget -q "$DOWNLOAD_URL"; then
-              echo "[SUCCESS] Downloaded $PACKAGE_ZIP (fallback)"
-              unzip -q "$PACKAGE_ZIP"
+            
+            if wget -q --timeout=60 "$DOWNLOAD_URL" -O "$PACKAGE_ZIP" 2>/dev/null && [ -s "$PACKAGE_ZIP" ]; then
+              echo "[SUCCESS] Downloaded $PACKAGE_ZIP from GitHub"
+              unzip -q "$PACKAGE_ZIP" 2>/dev/null || true
               PREBUILT_DOWNLOADED=true
             else
-              echo "[WARNING] Could not download prebuilt packages"
+              echo "[INFO] GitHub release packages not available"
             fi
+          fi
+          
+          # Count downloaded packages
+          PKG_COUNT=$(find . -name "*.ipk" 2>/dev/null | wc -l)
+          echo ""
+          echo "Prebuilt packages downloaded: $PKG_COUNT"
+          
+          if [ "$PKG_COUNT" -eq 0 ]; then
+            echo "[WARNING] No prebuilt packages could be downloaded"
+            echo "[INFO] Will rely on compiled packages only"
           fi
           
           echo "PREBUILT_DOWNLOADED=$PREBUILT_DOWNLOADED" >> $GITHUB_ENV
