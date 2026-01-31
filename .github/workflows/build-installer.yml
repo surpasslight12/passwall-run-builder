@@ -337,6 +337,10 @@ jobs:
             echo "[SUCCESS] Downloaded package index from SourceForge"
             
             # Extract package URLs from the index and download needed packages
+            # Note: NEEDED_PACKAGES uses IPK package names (output names), while PASSWALL_DEPS uses directory names
+            # e.g., v2ray-geodata directory produces v2ray-geoip and v2ray-geosite IPK packages
+            # shadowsocks-libev produces shadowsocks-libev-ss-{local,redir,server} packages
+            # shadowsocks-rust produces shadowsocks-rust-ss{local,server} packages
             NEEDED_PACKAGES="geoview hysteria shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin tuic-client shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server"
             
             for pkg in $NEEDED_PACKAGES; do
