@@ -178,3 +178,48 @@ OpenWrt SDK 的构建系统会自动检测并使用 PATH 中的工具：
 - ✅ **现在**: 使用 rustup 安装 Rust → 快速稳定 → Rust 包应该能成功编译 → 减少预编译包依赖
 
 与 Go 修复结合后，现在 Go 和 Rust 工具链都使用官方工具安装，确保了最佳的编译环境和成功率。
+
+---
+
+## 2026-02-01 更新：修复 Rust 跨平台编译问题
+
+### 问题描述
+
+虽然 Rust 1.93.0 已经通过 rustup 成功安装，但 shadow-tls 和 shadowsocks-rust 包编译仍然失败：
+
+```
+error[E0463]: can't find crate for `core`
+```
+
+### 根本原因
+
+这是一个**跨平台编译**问题：
+1. Rustup 默认只安装主机平台的标准库 (`x86_64-unknown-linux-gnu`)
+2. OpenWrt SDK 需要为 musl 目标平台编译 (`x86_64-unknown-linux-musl`)
+3. Rust 标准库 (包括 `core` crate) 在目标平台不可用
+4. 导致编译失败
+
+### 解决方案
+
+添加 `x86_64-unknown-linux-musl` 目标到 rustup：
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+```
+
+这会下载并安装 musl 目标的 Rust 标准库，使得跨平台编译能够正常工作。
+
+### 修改内容
+
+在 `.github/workflows/build-installer.yml` 的 "Install Rust toolchain" 步骤中：
+- 添加 `rustup target add x86_64-unknown-linux-musl`
+- 添加 `rustup target list --installed` 用于验证
+- 更新注释说明需要 musl 目标
+
+### 预期效果
+
+- ✅ Rust 标准库可用于 musl 目标
+- ✅ shadow-tls 应该能够成功编译
+- ✅ shadowsocks-rust-sslocal 应该能够成功编译
+- ✅ shadowsocks-rust-ssserver 应该能够成功编译
+- ✅ 不再出现 "can't find crate for `core`" 错误
