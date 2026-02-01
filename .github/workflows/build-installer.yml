@@ -36,6 +36,31 @@ jobs:
             build-essential libncurses5-dev gawk gettext unzip file \
             libssl-dev wget python3 git ca-certificates makeself zstd
 
+      - name: Install Go 1.25+
+        run: |
+          set -e
+          echo "=========================================="
+          echo "Installing Go 1.25+"
+          echo "=========================================="
+          
+          # Download and install Go 1.25.0 from official source
+          GO_VERSION="1.25.0"
+          GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
+          
+          echo "Downloading Go ${GO_VERSION}..."
+          wget "https://go.dev/dl/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"
+          
+          echo "Extracting Go..."
+          sudo rm -rf /usr/local/go
+          sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+          
+          echo "Setting up Go environment..."
+          echo "/usr/local/go/bin" >> $GITHUB_PATH
+          
+          # Verify installation
+          /usr/local/go/bin/go version
+          echo "[SUCCESS] Go ${GO_VERSION} installed successfully"
+
       - name: Download and extract OpenWrt SDK
         env:
           TERM: dumb
