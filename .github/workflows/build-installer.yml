@@ -43,8 +43,9 @@ jobs:
           echo "Installing Go 1.25+"
           echo "=========================================="
           
-          # Download and install Go 1.25.0 from official source
-          GO_VERSION="1.25.0"
+          # Download and install Go 1.25.6 from official source
+          # Required for xray-core (>= 1.25.6) and v2ray-plugin (>= 1.25)
+          GO_VERSION="1.25.6"
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
           echo "Downloading Go ${GO_VERSION}..."
