@@ -77,6 +77,15 @@ jobs:
             echo "[WARNING] feeds.conf.default not found" >&2
           fi
           
+          # Add OpenWrt community packages master branch for latest Go/Rust toolchains
+          # This provides newer versions than the release-based feeds
+          echo "" >> feeds.conf
+          echo "# OpenWrt community packages master branch for latest language toolchains" >> feeds.conf
+          echo "src-git packages_master https://github.com/openwrt/packages.git;master" >> feeds.conf
+          echo "[SUCCESS] Added packages_master feed for latest Go/Rust toolchains"
+          echo "Current feeds.conf:"
+          cat feeds.conf
+          
           # Function to update feeds with retry logic
           update_feeds_with_retry() {
             local max_retries=3
@@ -157,8 +166,20 @@ jobs:
           echo "=========================================="
           ./scripts/feeds update -i
           
-          echo "Installing language toolchains..."
-          ./scripts/feeds install golang rust
+          echo "Installing language toolchains from packages_master (latest versions)..."
+          # Use packages_master feed for latest Go/Rust toolchains
+          # The -p option specifies which feed to install from
+          ./scripts/feeds install -p packages_master golang rust
+          
+          echo "Verifying installed toolchain versions..."
+          if [ -d "feeds/packages_master/lang/golang" ]; then
+            echo "Go version from packages_master:"
+            grep -h "PKG_VERSION\|GO_VERSION_MAJOR_MINOR" feeds/packages_master/lang/golang/golang/Makefile 2>/dev/null | head -5 || true
+          fi
+          if [ -d "feeds/packages_master/lang/rust" ]; then
+            echo "Rust version from packages_master:"
+            grep -h "PKG_VERSION" feeds/packages_master/lang/rust/rust/Makefile 2>/dev/null | head -3 || true
+          fi
           
           echo "Installing runtime dependencies..."
           ./scripts/feeds install \
@@ -336,10 +357,9 @@ jobs:
           
           # PassWall dependency packages - download from OpenWrt official sources
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
-          # Packages that require newer Go/Rust toolchains:
-          # - geoview, hysteria: require Go >= 1.24.0 (SDK has 1.23.12)
-          # - v2ray-plugin, xray-core: require Go >= 1.25+ (SDK has 1.23.12)
-          # - shadow-tls, shadowsocks-rust: require Rust toolchain that fails to build on CI
+          # Note: Go/Rust toolchains are now installed from OpenWrt packages master branch,
+          # which should provide newer versions. However, some packages may still fail to compile
+          # due to other CI environment limitations. Prebuilt packages are used as fallback.
           # Note: shadowsocks-libev and shadowsocksr-libev variants are compiled from SDK, not downloaded
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
@@ -631,8 +651,7 @@ jobs:
           
           if [ "$PKG_COUNT" -eq 0 ]; then
             echo "[WARNING] No prebuilt packages could be downloaded"
-            echo "[INFO] Some packages (geoview, hysteria, shadow-tls, shadowsocks-rust, v2ray-plugin, xray-core)"
-            echo "[INFO] require newer Go/Rust toolchains than provided by OpenWrt SDK 24.10"
+            echo "[INFO] Some packages may fail to compile due to CI environment limitations"
             echo "[INFO] These packages will be missing from the final installer"
           fi
           
@@ -762,8 +781,8 @@ jobs:
               echo "  - $pkg"
             done
             echo ""
-            echo "[INFO] These packages likely require newer Go/Rust toolchains."
-            echo "[INFO] Consider downloading prebuilt packages from SourceForge or using a newer SDK."
+            echo "[INFO] These packages may have failed to compile or were not available as prebuilt."
+            echo "[INFO] Consider downloading prebuilt packages from SourceForge."
           else
             echo "[SUCCESS] All dependency packages collected successfully!"
           fi
@@ -784,17 +803,15 @@ jobs:
           
           # Package count explanation:
           # DEPENDENCY_PATTERNS lists 23 PassWall dependency package patterns.
-          # Up to 7 packages may be missing due to toolchain requirements:
-          #   - geoview, hysteria: require Go >= 1.24.0
-          #   - v2ray-plugin, xray-core: require Go >= 1.25+
-          #   - shadow-tls, shadowsocks-rust-sslocal, shadowsocks-rust-ssserver: require Rust
+          # Go/Rust toolchains are now from OpenWrt packages master branch for latest versions.
+          # Some packages may still fail to compile due to CI environment limitations.
           # Dependency packages are downloaded from OpenWrt official first, then SourceForge fallback
-          # Minimum expected: 15 packages (23 - 7 missing + some SDK compiled)
+          # Minimum expected: 15 packages
           # With all prebuilt packages: up to 23 packages
           MIN_EXPECTED_PACKAGES=15
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
             echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-23)"
-            echo "[INFO] Some packages require newer Go (>=1.24) or Rust toolchains not available in SDK 24.10"
+            echo "[INFO] Some packages may have failed to compile or download"
           fi
           
           echo ""
