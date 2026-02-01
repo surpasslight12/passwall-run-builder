@@ -83,17 +83,17 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 - **地理数据**：v2ray-geoip, v2ray-geosite, geoview
 
 这些依赖包通过以下方式获取：
-1. 优先尝试从源码编译（使用 OpenWrt SDK 25.12，Go/Rust 工具链来自 OpenWrt 社区包 master 分支以获取最新版本）
+1. 优先尝试从源码编译（使用 OpenWrt SDK 25.12，Go 1.25.6 从官方源安装，Rust 工具链来自 OpenWrt 社区包 master 分支）
 2. 对于编译失败的包，自动从 SourceForge 上的官方 PassWall 预编译版本下载补充（优先使用最新版本）
 
 ## Go/Rust 工具链
 
-本项目使用 OpenWrt 社区包仓库的 master 分支 (https://github.com/openwrt/packages/tree/master) 来获取最新的 Go 和 Rust 编译工具链。这确保了：
+本项目使用以下编译工具链：
 
-- **Go**: 使用最新版本，满足 xray-core、v2ray-plugin、geoview、hysteria 等包对 Go >= 1.24.0 的要求
-- **Rust**: 使用最新版本，满足 shadowsocks-rust、shadow-tls 等包的编译需求
+- **Go**: 从 Go 官方源安装 1.25.6 版本，满足 xray-core (>= 1.25.6)、v2ray-plugin (>= 1.25)、geoview、hysteria 等包的编译需求
+- **Rust**: 从 OpenWrt 社区包仓库的 master 分支 (https://github.com/openwrt/packages/tree/master) 获取最新版本，满足 shadowsocks-rust、shadow-tls 等包的编译需求
 
-通过使用 master 分支的工具链，可以编译更多的 PassWall 依赖包，减少对预编译包的依赖。
+通过使用最新的工具链，可以编译更多的 PassWall 依赖包，减少对预编译包的依赖。
 
 ## 常见问题 / FAQ
 
