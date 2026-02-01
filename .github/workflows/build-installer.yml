@@ -65,6 +65,33 @@ jobs:
           /usr/local/go/bin/go version
           echo "[SUCCESS] Go ${GO_VERSION} installed successfully and added to PATH"
 
+      - name: Install Rust toolchain
+        run: |
+          set -e
+          echo "=========================================="
+          echo "Installing Rust toolchain for OpenWrt SDK"
+          echo "=========================================="
+          
+          # Install Rust using rustup (official Rust installer)
+          # This will be used by the OpenWrt SDK build system for compiling Rust packages
+          # Required for shadow-tls, shadowsocks-rust packages
+          # NOTE: We install system Rust instead of building from feeds because:
+          # 1. Building Rust compiler from source takes too long in CI (often >30 minutes)
+          # 2. It frequently fails with build errors in CI environment
+          # 3. System rustup provides stable, pre-built toolchains that work reliably
+          
+          echo "Installing rustup..."
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          
+          echo "Setting up Rust environment..."
+          source "$HOME/.cargo/env"
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          
+          # Verify installation
+          rustc --version
+          cargo --version
+          echo "[SUCCESS] Rust toolchain installed successfully and added to PATH"
+
       - name: Download and extract OpenWrt SDK
         env:
           TERM: dumb
@@ -113,13 +140,6 @@ jobs:
             echo "[SUCCESS] Created minimal feeds.conf with packages and luci feeds"
           fi
           
-          # Add OpenWrt community packages master branch for latest Rust toolchain
-          # This provides newer Rust version than the release-based feeds
-          # Note: Go 1.25.6 is installed system-wide (see earlier step) and will be used directly
-          echo "" >> feeds.conf
-          echo "# OpenWrt community packages master branch for latest Rust toolchain" >> feeds.conf
-          echo "src-git packages_master https://github.com/openwrt/packages.git;master" >> feeds.conf
-          echo "[SUCCESS] Added packages_master feed for latest Rust toolchain"
           echo "Current feeds.conf:"
           cat feeds.conf
           
@@ -203,34 +223,20 @@ jobs:
           echo "=========================================="
           ./scripts/feeds update -i
           
-          echo "Installing Rust toolchain from packages_master..."
-          # Install ONLY Rust from packages_master feed (not golang)
-          # Go 1.25.6 was already installed system-wide in a previous step
-          # and will be used directly by the OpenWrt SDK build system
-          ./scripts/feeds install -p packages_master rust || {
-            echo "[WARNING] Failed to install Rust from packages_master, trying default packages feed..."
-            ./scripts/feeds install -p packages rust
-          }
-          
-          echo "Verifying installed toolchain versions..."
+          echo "Verifying system toolchain versions..."
           echo "System Go version (will be used for compilation):"
           go version || echo "[WARNING] Go not found in PATH"
-          if [ -d "feeds/packages_master/lang/rust" ]; then
-            echo "Rust version from packages_master:"
-            grep -h "PKG_VERSION" feeds/packages_master/lang/rust/rust/Makefile 2>/dev/null | head -3 || true
-          else
-            echo "[WARNING] Rust not found in packages_master, attempting to install from default packages feed..."
-            ./scripts/feeds install -p packages rust || {
-              echo "[WARNING] Failed to install Rust from packages feed"
-              echo "[INFO] Rust installation failed. Rust-based packages will be downloaded as prebuilt packages."
-              echo "[INFO] The build will continue using the fallback download mechanism (see lines 516+ for details)."
-            }
-            # Verify rust installation after fallback
-            if [ -d "feeds/packages/lang/rust" ]; then
-              echo "Rust version from packages feed:"
-              grep -h "PKG_VERSION" feeds/packages/lang/rust/rust/Makefile 2>/dev/null | head -3 || true
-            fi
-          fi
+          echo "System Rust version (will be used for compilation):"
+          rustc --version || echo "[WARNING] Rust not found in PATH"
+          cargo --version || echo "[WARNING] Cargo not found in PATH"
+          
+          echo ""
+          echo "NOTE: Go 1.25.6 and Rust were installed system-wide in previous steps"
+          echo "NOTE: We do NOT install golang or rust packages from feeds because:"
+          echo "  1. Feeds golang (1.23.12) is too old for xray-core (requires >= 1.25.6)"
+          echo "  2. Building Rust compiler from feeds takes too long and often fails in CI"
+          echo "  3. OpenWrt SDK will automatically use system Go and Rust from PATH"
+          echo ""
           
           echo "Installing runtime dependencies..."
           ./scripts/feeds install \
@@ -408,9 +414,9 @@ jobs:
           
           # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
-          # Note: Go/Rust toolchains are now installed from OpenWrt packages master branch,
-          # which should provide newer versions. However, some packages may still fail to compile
-          # due to other CI environment limitations. Prebuilt packages are used as fallback.
+          # Note: Go 1.25.6 and Rust toolchains are now installed system-wide from official sources,
+          # so most packages should compile successfully. However, some packages may still fail to compile
+          # due to other reasons (missing dependencies, etc.). Prebuilt packages are used as fallback.
           # Note: shadowsocks-libev and shadowsocksr-libev variants are compiled from SDK, not downloaded
           # Note: OpenWrt official releases (downloads.openwrt.org) do not contain PassWall-specific packages,
           # so we skip that source and go directly to SourceForge which hosts the prebuilt PassWall packages.
@@ -802,11 +808,11 @@ jobs:
           
           # Package count explanation:
           # DEPENDENCY_PATTERNS lists 23 PassWall dependency package patterns.
-          # Go/Rust toolchains are now from OpenWrt packages master branch for latest versions.
-          # Some packages may still fail to compile due to CI environment limitations.
-          # Dependency packages are downloaded from OpenWrt official first, then SourceForge fallback
+          # Go 1.25.6 and Rust are now installed system-wide from official sources.
+          # Most packages should compile successfully with proper toolchains.
+          # Dependency packages are downloaded from SourceForge as fallback for compilation failures.
           # Minimum expected: 15 packages
-          # With all prebuilt packages: up to 23 packages
+          # With all packages compiled or downloaded: up to 23 packages
           MIN_EXPECTED_PACKAGES=15
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
             echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-23)"

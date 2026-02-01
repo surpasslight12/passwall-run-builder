@@ -91,9 +91,11 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 本项目使用以下编译工具链：
 
 - **Go**: 从 Go 官方源安装 1.25.6 版本，满足 xray-core (>= 1.25.6)、v2ray-plugin (>= 1.25)、geoview、hysteria 等包的编译需求
-- **Rust**: 从 OpenWrt 社区包仓库的 master 分支 (https://github.com/openwrt/packages/tree/master) 获取最新版本，满足 shadowsocks-rust、shadow-tls 等包的编译需求
+- **Rust**: 使用 rustup (官方 Rust 安装程序) 安装最新稳定版本，满足 shadowsocks-rust、shadow-tls 等包的编译需求
 
 通过使用最新的工具链，可以编译更多的 PassWall 依赖包，减少对预编译包的依赖。
+
+**注意**：之前尝试从 OpenWrt feeds 安装 Rust，但在 CI 环境中从源码编译 Rust 编译器耗时过长（通常超过 30 分钟）且经常失败。改用 rustup 安装预编译的 Rust 工具链可以显著提高构建速度和成功率。
 
 ## 常见问题 / FAQ
 
