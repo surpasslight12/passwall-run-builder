@@ -102,7 +102,8 @@ jobs:
           else
             echo "[WARNING] feeds.conf.default not found, creating minimal feeds.conf" >&2
             # Create minimal feeds.conf with packages and luci feeds
-            # These URLs point to the default branches which match the SDK version
+            # Using default branches (no version specified) allows OpenWrt to fetch
+            # the appropriate version based on the SDK version being used
             cat > feeds.conf << 'EOF'
 src-git packages https://github.com/openwrt/packages.git
 src-git luci https://github.com/openwrt/luci.git
@@ -215,9 +216,8 @@ EOF
           else
             echo "[WARNING] Rust not found in packages_master, attempting to install from default packages feed..."
             ./scripts/feeds install -p packages rust || {
-              echo "[ERROR] Failed to install Rust from packages feed"
-              echo "[CRITICAL] Rust installation failed. Rust-based packages may not compile."
-              echo "[INFO] Build will continue but shadowsocks-rust and shadow-tls may need to be downloaded as prebuilt packages."
+              echo "[WARNING] Failed to install Rust from packages feed"
+              echo "[INFO] Rust installation failed. Rust-based packages will be downloaded as prebuilt packages."
             }
             # Verify rust installation after fallback
             if [ -d "feeds/packages/lang/rust" ]; then
