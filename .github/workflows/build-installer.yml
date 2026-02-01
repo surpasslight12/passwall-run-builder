@@ -100,7 +100,16 @@ jobs:
             cp feeds.conf.default feeds.conf
             echo "[SUCCESS] Copied feeds.conf.default to feeds.conf"
           else
-            echo "[WARNING] feeds.conf.default not found" >&2
+            echo "[WARNING] feeds.conf.default not found, creating minimal feeds.conf" >&2
+            # Create minimal feeds.conf with packages and luci feeds
+            # Using default branches (no version specified) allows OpenWrt SDK to automatically
+            # select the appropriate branch based on the SDK version, ensuring compatibility.
+            # This is the recommended approach for OpenWrt SDK builds.
+            cat > feeds.conf << 'EOF'
+src-git packages https://github.com/openwrt/packages.git
+src-git luci https://github.com/openwrt/luci.git
+EOF
+            echo "[SUCCESS] Created minimal feeds.conf with packages and luci feeds"
           fi
           
           # Add OpenWrt community packages master branch for latest Go/Rust toolchains
@@ -205,6 +214,18 @@ jobs:
           if [ -d "feeds/packages_master/lang/rust" ]; then
             echo "Rust version from packages_master:"
             grep -h "PKG_VERSION" feeds/packages_master/lang/rust/rust/Makefile 2>/dev/null | head -3 || true
+          else
+            echo "[WARNING] Rust not found in packages_master, attempting to install from default packages feed..."
+            ./scripts/feeds install -p packages rust || {
+              echo "[WARNING] Failed to install Rust from packages feed"
+              echo "[INFO] Rust installation failed. Rust-based packages will be downloaded as prebuilt packages."
+              echo "[INFO] The build will continue using the fallback download mechanism (see lines 516+ for details)."
+            }
+            # Verify rust installation after fallback
+            if [ -d "feeds/packages/lang/rust" ]; then
+              echo "Rust version from packages feed:"
+              grep -h "PKG_VERSION" feeds/packages/lang/rust/rust/Makefile 2>/dev/null | head -3 || true
+            fi
           fi
           
           echo "Installing runtime dependencies..."
