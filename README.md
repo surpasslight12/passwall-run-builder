@@ -32,7 +32,7 @@
 
 2. 在 GitHub 仓库的 **Actions** 页面启用 workflow。
 
-3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 23.05.3 SDK），**无需修改 GitHub Actions 文件本身**。
+3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 24.10.5 SDK），**无需修改 GitHub Actions 文件本身**。
 
 4. 给仓库打一个版本 tag 触发构建：
 
@@ -62,7 +62,7 @@
 - 本项目的 `payload/install.sh` 已根据官方安装脚本编写，会在 OpenWrt 设备上调用 `opkg` 安装/强制重装这些 IPK，并处理部分旧依赖问题。
 - **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在 OpenWrt SDK 24.10 下编译可能失败，workflow 会自动从官方 PassWall 发布中下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。
 
-生成的 `.run` 文件可以直接在 Linux 上执行：
+生成的 `.run` 文件可以直接在 OpenWrt 设备上执行（详见下文"运行安装包"部分）：
 
 ```bash
 chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
@@ -116,5 +116,56 @@ Config-build.in:1247:warning: defaults for choice values not supported
 1. 检查 OpenWrt SDK 的下载链接是否有效
 2. 查看构建日志，确认是网络问题还是编译错误
 3. 某些依赖包可能需要特定版本的 SDK，可以尝试切换 SDK 版本
+
+### 安装失败排查
+
+如果在 OpenWrt 设备上运行 `.run` 安装包时遇到问题：
+
+1. **版本检测失败**：确保 `payload/` 目录中包含正确命名的 IPK 文件
+   - `luci-app-passwall_<版本号>_all.ipk`
+   - `luci-i18n-passwall-zh-cn_<版本号>_all.ipk`
+
+2. **opkg update 失败**：
+   - 检查设备网络连接是否正常
+   - 验证 `/etc/opkg/distfeeds.conf` 中的软件源是否可访问
+   - 尝试手动运行 `opkg update` 查看详细错误
+
+3. **依赖安装失败**：
+   - 确保设备有足够的存储空间（至少 50MB 可用）
+   - 检查是否有冲突的软件包已安装
+   - 查看 `/tmp/opkg-lists/` 中的软件源列表
+
+4. **权限问题**：
+   - 确保以 root 用户运行安装脚本
+   - 检查 `/overlay` 分区是否有写权限
+
+### 运行安装包
+
+生成的 `.run` 文件在 OpenWrt 设备上的使用方法：
+
+```bash
+# 上传到设备后
+chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
+
+# 运行安装
+./PassWall_26.1.21_x86_64_all_sdk_24.10.run
+
+# 安装完成后重启相关服务
+/etc/init.d/passwall restart
+```
+
+## 系统要求
+
+### OpenWrt 设备要求
+- **架构**：与 SDK 版本匹配（如 x86_64, arm_cortex-a9, mipsel_24kc 等）
+- **固件版本**：OpenWrt 24.10 或兼容版本
+- **存储空间**：至少 50MB 可用空间用于安装所有依赖包
+- **内存**：建议至少 128MB RAM
+
+### 构建环境要求（CI）
+- Ubuntu latest
+- 至少 2GB 可用磁盘空间用于 SDK 和编译产物
+- Go 1.25+ （用于编译 xray-core, v2ray-plugin 等）
+- Rust 工具链（用于编译 shadowsocks-rust, shadow-tls 等）
 
 # passwall_run
