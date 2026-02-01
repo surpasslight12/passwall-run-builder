@@ -62,7 +62,7 @@
 - 本项目的 `payload/install.sh` 已根据官方安装脚本编写，会在 OpenWrt 设备上调用 `opkg` 安装/强制重装这些 IPK，并处理部分旧依赖问题。
 - **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在 OpenWrt SDK 24.10 下编译可能失败，workflow 会自动从官方 PassWall 发布中下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。
 
-生成的 `.run` 文件可以直接在 OpenWrt 设备上执行（详见下方"运行安装包"部分）：
+生成的 `.run` 文件可以直接在 OpenWrt 设备上执行（详见下文"运行安装包"部分）：
 
 ```bash
 chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
