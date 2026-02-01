@@ -79,6 +79,7 @@ jobs:
           # 1. Building Rust compiler from source takes too long in CI (often >30 minutes)
           # 2. It frequently fails with build errors in CI environment
           # 3. System rustup provides stable, pre-built toolchains that work reliably
+          # 4. We need to add the x86_64-unknown-linux-musl target for OpenWrt SDK cross-compilation
           
           echo "Installing rustup..."
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
@@ -87,9 +88,14 @@ jobs:
           source "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           
+          # Add musl target for OpenWrt cross-compilation
+          echo "Adding x86_64-unknown-linux-musl target..."
+          rustup target add x86_64-unknown-linux-musl
+          
           # Verify installation
           rustc --version
           cargo --version
+          rustup target list --installed
           echo "[SUCCESS] Rust toolchain installed successfully and added to PATH"
 
       - name: Download and extract OpenWrt SDK
