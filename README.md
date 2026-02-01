@@ -32,7 +32,7 @@
 
 2. 在 GitHub 仓库的 **Actions** 页面启用 workflow。
 
-2. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 25.12.0 SDK），**无需修改 GitHub Actions 文件本身**。
+3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 25.12.0 SDK），**无需修改 GitHub Actions 文件本身**。
 
 4. 给仓库打一个版本 tag 触发构建：
 
