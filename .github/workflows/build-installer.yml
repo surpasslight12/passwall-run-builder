@@ -105,10 +105,8 @@ jobs:
             # Using default branches (no version specified) allows OpenWrt SDK to automatically
             # select the appropriate branch based on the SDK version, ensuring compatibility.
             # This is the recommended approach for OpenWrt SDK builds.
-            cat > feeds.conf << 'EOF'
-src-git packages https://github.com/openwrt/packages.git
-src-git luci https://github.com/openwrt/luci.git
-EOF
+            echo "src-git packages https://github.com/openwrt/packages.git" > feeds.conf
+            echo "src-git luci https://github.com/openwrt/luci.git" >> feeds.conf
             echo "[SUCCESS] Created minimal feeds.conf with packages and luci feeds"
           fi
           
