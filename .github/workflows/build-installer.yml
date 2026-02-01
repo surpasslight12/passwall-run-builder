@@ -102,8 +102,9 @@ jobs:
           else
             echo "[WARNING] feeds.conf.default not found, creating minimal feeds.conf" >&2
             # Create minimal feeds.conf with packages and luci feeds
-            # Using default branches (no version specified) allows OpenWrt to fetch
-            # the appropriate version based on the SDK version being used
+            # Using default branches (no version specified) allows OpenWrt SDK to automatically
+            # select the appropriate branch based on the SDK version, ensuring compatibility.
+            # This is the recommended approach for OpenWrt SDK builds.
             cat > feeds.conf << 'EOF'
 src-git packages https://github.com/openwrt/packages.git
 src-git luci https://github.com/openwrt/luci.git
@@ -218,6 +219,7 @@ EOF
             ./scripts/feeds install -p packages rust || {
               echo "[WARNING] Failed to install Rust from packages feed"
               echo "[INFO] Rust installation failed. Rust-based packages will be downloaded as prebuilt packages."
+              echo "[INFO] The build will continue using the fallback download mechanism (see lines 516+ for details)."
             }
             # Verify rust installation after fallback
             if [ -d "feeds/packages/lang/rust" ]; then
