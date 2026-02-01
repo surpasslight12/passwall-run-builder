@@ -32,7 +32,7 @@
 
 2. 在 GitHub 仓库的 **Actions** 页面启用 workflow。
 
-3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 24.10.5 SDK），**无需修改 GitHub Actions 文件本身**。
+3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 25.12.0 SDK），**无需修改 GitHub Actions 文件本身**。
 
 4. 给仓库打一个版本 tag 触发构建：
 
@@ -60,7 +60,7 @@
    - `payload/luci-i18n-passwall-zh-cn_*.ipk`
    - `payload/depends/*.ipk`
 - 本项目的 `payload/install.sh` 已根据官方安装脚本编写，会在 OpenWrt 设备上调用 `opkg` 安装/强制重装这些 IPK，并处理部分旧依赖问题。
-- **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在 OpenWrt SDK 24.10 下编译可能失败，workflow 会自动从官方 PassWall 发布中下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。
+- **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在某些 SDK 版本下编译可能失败，workflow 会自动从官方 PassWall SourceForge 发布源下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。本项目默认使用 OpenWrt SDK 25.12 版本以获得更新的编译工具链支持。
 
 生成的 `.run` 文件可以直接在 OpenWrt 设备上执行（详见下文"运行安装包"部分）：
 
@@ -83,9 +83,8 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 - **地理数据**：v2ray-geoip, v2ray-geosite, geoview
 
 这些依赖包通过以下方式获取：
-1. 优先尝试从源码编译（使用 OpenWrt SDK，Go/Rust 工具链来自 OpenWrt 社区包 master 分支以获取最新版本）
-2. 对于编译失败的包，自动从 SourceForge 上的官方 PassWall 预编译版本下载补充
-3. 作为最后的回退，尝试从 OpenWrt 官方发布源 (https://downloads.openwrt.org/releases/) 下载
+1. 优先尝试从源码编译（使用 OpenWrt SDK 25.12，Go/Rust 工具链来自 OpenWrt 社区包 master 分支以获取最新版本）
+2. 对于编译失败的包，自动从 SourceForge 上的官方 PassWall 预编译版本下载补充（优先使用最新版本）
 
 ## Go/Rust 工具链
 
@@ -158,7 +157,7 @@ chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
 
 ### OpenWrt 设备要求
 - **架构**：与 SDK 版本匹配（如 x86_64, arm_cortex-a9, mipsel_24kc 等）
-- **固件版本**：OpenWrt 24.10 或兼容版本
+- **固件版本**：OpenWrt 25.12 或兼容版本（24.10 也可能兼容）
 - **存储空间**：至少 50MB 可用空间用于安装所有依赖包
 - **内存**：建议至少 128MB RAM
 

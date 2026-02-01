@@ -392,7 +392,7 @@ jobs:
           
           echo ""
           echo "=========================================="
-          echo "Downloading PassWall dependency packages from OpenWrt official sources"
+          echo "Downloading PassWall dependency packages from SourceForge"
           echo "=========================================="
           
           mkdir -p prebuilt-packages
@@ -400,78 +400,26 @@ jobs:
           
           PREBUILT_DOWNLOADED=false
           
-          # PassWall dependency packages - download from OpenWrt official sources
+          # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
           # Note: Go/Rust toolchains are now installed from OpenWrt packages master branch,
           # which should provide newer versions. However, some packages may still fail to compile
           # due to other CI environment limitations. Prebuilt packages are used as fallback.
           # Note: shadowsocks-libev and shadowsocksr-libev variants are compiled from SDK, not downloaded
+          # Note: OpenWrt official releases (downloads.openwrt.org) do not contain PassWall-specific packages,
+          # so we skip that source and go directly to SourceForge which hosts the prebuilt PassWall packages.
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
             simple-obfs sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
           
-          # Try official OpenWrt releases for PassWall dependency packages
-          OPENWRT_SUBDIRS="packages base"
-          
-          for SUBDIR in $OPENWRT_SUBDIRS; do
-            OPENWRT_INDEX="https://downloads.openwrt.org/releases/${SDK_VERSION_FULL}/packages/${ARCH_NAME}/${SUBDIR}/Packages"
-            
-            echo "Trying OpenWrt official index: $OPENWRT_INDEX"
-            if wget -q --timeout=60 -O "Packages-openwrt-${SUBDIR}.tmp" "$OPENWRT_INDEX" 2>/dev/null; then
-              if [ -s "Packages-openwrt-${SUBDIR}.tmp" ] && grep -q "^Package:" "Packages-openwrt-${SUBDIR}.tmp" 2>/dev/null; then
-                mv "Packages-openwrt-${SUBDIR}.tmp" "Packages-openwrt-${SUBDIR}"
-                echo "[SUCCESS] Downloaded OpenWrt ${SDK_VERSION_FULL} ${SUBDIR} package index"
-                echo "[INFO] Index contains $(grep -c '^Package:' Packages-openwrt-${SUBDIR}) packages"
-                
-                for pkg in $PASSWALL_DEPS; do
-                  # Skip if already downloaded
-                  if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-                    continue
-                  fi
-                  
-                  # Extract filename from Packages index
-                  PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-openwrt-${SUBDIR} | grep "^Filename:" | head -1 | awk '{print $2}')
-                  if [ -n "$PKG_FILE" ]; then
-                    PKG_URL="https://downloads.openwrt.org/releases/${SDK_VERSION_FULL}/packages/${ARCH_NAME}/${SUBDIR}/${PKG_FILE}"
-                    echo "Downloading PassWall dependency from OpenWrt official: $pkg"
-                    if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
-                      echo "  [SUCCESS] Downloaded $pkg from OpenWrt official"
-                      PREBUILT_DOWNLOADED=true
-                    else
-                      echo "  [FAILED] Could not download $pkg from OpenWrt official"
-                    fi
-                  fi
-                done
-                
-                rm -f Packages-openwrt-${SUBDIR}
-              else
-                echo "[INFO] Response is not a valid Packages index"
-                rm -f "Packages-openwrt-${SUBDIR}.tmp"
-              fi
-            else
-              echo "[INFO] Could not reach OpenWrt ${SDK_VERSION_FULL} ${SUBDIR} index"
-            fi
-          done
-          
           echo ""
           echo "=========================================="
-          echo "Downloading missing PassWall dependencies from SourceForge (fallback)"
+          echo "Downloading PassWall dependencies from SourceForge (primary source)"
           echo "=========================================="
           
-          # Check which packages are still missing after trying OpenWrt official
-          MISSING_DEPS=""
-          for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-              MISSING_DEPS="$MISSING_DEPS $pkg"
-            fi
-          done
-          
-          if [ -n "$MISSING_DEPS" ]; then
-            echo "[INFO] Missing dependency packages after OpenWrt official:$MISSING_DEPS"
-          else
-            echo "[SUCCESS] All PassWall dependency packages downloaded from OpenWrt official"
-          fi
+          # All PassWall dependency packages from SourceForge
+          MISSING_DEPS="$PASSWALL_DEPS"
           
           # SourceForge mirror URLs for openwrt-passwall-build (fallback for missing deps)
           SF_MIRRORS="master.dl.sourceforge.net downloads.sourceforge.net netcologne.dl.sourceforge.net netix.dl.sourceforge.net"
@@ -609,8 +557,8 @@ jobs:
             
             # Try to get the latest release version from openwrt-passwall.mirror
             # The releases are organized as folders like 26.1.17-1, 25.12.25-1, etc.
-            # Updated list based on actual available releases on SourceForge
-            RELEASE_VERSIONS="26.1.17-1 25.12.25-1 26.1.1-1 25.12.22-1 25.12.15-1"
+            # Ordered from newest to oldest to prefer latest versions
+            RELEASE_VERSIONS="26.1.21-1 26.1.17-1 26.1.1-1 25.12.25-1 25.12.22-1 25.12.15-1"
             
             for SF_MIRROR in $SF_MIRRORS; do
               echo "Checking openwrt-passwall.mirror on $SF_MIRROR..."
