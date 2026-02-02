@@ -570,7 +570,7 @@ jobs:
           
           if [ -n "$FINAL_MISSING" ]; then
             echo ""
-            echo "[WARNING] Missing dependency packages:$FINAL_MISSING"
+            echo "[INFO] Missing dependency packages:$FINAL_MISSING"
             echo "[INFO] These packages may not be available in the prebuilt repository"
           fi
           
@@ -622,6 +622,8 @@ jobs:
 
       - name: Collect and merge packages
         working-directory: openwrt-sdk
+        # Use bash for compgen glob checks in this step.
+        shell: bash
         run: |
           set -e
           echo "=========================================="
@@ -737,13 +739,14 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if ! ls "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk 1>/dev/null 2>&1; then
+            if ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk >/dev/null && \
+              ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk >/dev/null; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
           
           if [ -n "$MISSING_PKGS" ]; then
-            echo "[WARNING] The following packages are MISSING and will not be in the installer:"
+            echo "[INFO] The following packages are missing and will not be in the installer:"
             for pkg in $MISSING_PKGS; do
               echo "  - $pkg"
             done
@@ -794,6 +797,8 @@ jobs:
           echo "[SUCCESS] Package validation completed"
 
       - name: Validate payload
+        # Use bash for compgen glob checks in this step.
+        shell: bash
         run: |
           ls -l payload
           test -f payload/install.sh
@@ -802,8 +807,9 @@ jobs:
             exit 1
           fi
           # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if ! ls payload/luci-i18n-passwall-zh-cn-*.apk payload/luci-i18n-passwall-zh-cn_*.apk 1>/dev/null 2>&1; then
-            echo "[WARNING] Chinese i18n package not found - this is non-critical"
+          if ! compgen -G "payload/luci-i18n-passwall-zh-cn-"*.apk >/dev/null && \
+            ! compgen -G "payload/luci-i18n-passwall-zh-cn_"*.apk >/dev/null; then
+            echo "[INFO] Chinese i18n package not found - continuing without it"
           fi
           test -d payload/depends
 
