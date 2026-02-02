@@ -739,8 +739,7 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            esc_prefix=$(printf '%s' "$pkg_prefix" | sed 's/[][\\*?]/\\\\&/g')
-            if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${esc_prefix}-*.apk" -o -name "${esc_prefix}_*.apk" \) -print -quit 2>/dev/null)" ]; then
+            if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}-*.apk" -o -name "${pkg_prefix}_*.apk" \) -print -quit 2>/dev/null)" ]; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
