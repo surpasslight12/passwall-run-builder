@@ -444,6 +444,7 @@ jobs:
           cd prebuilt-packages
           
           PREBUILT_DOWNLOADED=false
+          WGET_RETRY_OPTS=(--timeout=60 --tries=3 -q)
           
           # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
@@ -466,76 +467,95 @@ jobs:
           # All PassWall dependency packages from SourceForge
           MISSING_DEPS="$PASSWALL_DEPS"
           
-          # SourceForge base URL for openwrt-passwall-build
-          # Using the web interface URL format which requires /download suffix for actual file downloads
-          SF_BASE_URL="https://sourceforge.net/projects/openwrt-passwall-build/files/releases"
+          # SourceForge base URLs for openwrt-passwall-build
+          # Use both SourceForge web URLs and direct download URLs to improve reliability
+          SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
+          SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
+          # NOTE: SOURCEFORGE_MIRROR_BASES and SOURCEFORGE_MIRROR_SUFFIXES indices must stay aligned.
+          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -eq 0 ] || [ "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" -eq 0 ]; then
+            echo "[ERROR] SourceForge mirror arrays are empty" >&2
+            exit 1
+          fi
+          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -ne "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" ]; then
+            echo "[ERROR] SourceForge mirror arrays are misaligned" >&2
+            exit 1
+          fi
           
           # Version paths to try (in order of preference)
-          # For new SDK versions, try SDK_VERSION first, then snapshots as fallback
+          # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
           VERSION_PATHS="packages-${SDK_VERSION} snapshots/packages"
+          if [ -n "$SDK_VERSION_FULL" ] && [ "$SDK_VERSION_FULL" != "$SDK_VERSION" ]; then
+            VERSION_PATHS="packages-${SDK_VERSION_FULL} $VERSION_PATHS"
+          fi
           
           # Try SourceForge passwall-build repository for missing dependency packages
           if [ -n "$MISSING_DEPS" ]; then
-            FOUND_WORKING_REPO=false
+            ALL_DOWNLOADED=false
             for VERSION_PATH in $VERSION_PATHS; do
-              if [ "$FOUND_WORKING_REPO" = "true" ]; then
-                break
-              fi
-              
               echo ""
               echo "Trying version path: ${VERSION_PATH}"
               
-              SOURCEFORGE_INDEX="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/Packages/download"
-              
-              echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
-              if wget -q --timeout=60 -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
-                # Check if the downloaded file is an actual Packages index (not HTML error page)
-                if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
-                  mv "Packages.tmp" "Packages"
-                  echo "[SUCCESS] Downloaded package index from SourceForge ($VERSION_PATH)"
-                  echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
-                  FOUND_WORKING_REPO=true
-                  
-                  for pkg in $MISSING_DEPS; do
-                    # Skip if already downloaded
-                    if ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
-                      continue
-                    fi
-                    # Extract filename from Packages index
-                    PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
-                    if [ -n "$PKG_FILE" ]; then
-                      PKG_URL="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/${PKG_FILE}/download"
-                      echo "Downloading missing dependency from SourceForge: $pkg"
-                      if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
-                        echo "  [SUCCESS] Downloaded $pkg"
-                        PREBUILT_DOWNLOADED=true
-                      else
-                        echo "  [SKIPPED] Could not download $pkg"
+              for idx in "${!SOURCEFORGE_MIRROR_BASES[@]}"; do
+                SF_BASE_URL="${SOURCEFORGE_MIRROR_BASES[$idx]}"
+                SF_SUFFIX="${SOURCEFORGE_MIRROR_SUFFIXES[$idx]}"
+                SOURCEFORGE_INDEX="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/Packages${SF_SUFFIX}"
+                
+                echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
+                if wget "${WGET_RETRY_OPTS[@]}" -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
+                  # Check if the downloaded file is an actual Packages index (not HTML error page)
+                  if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
+                    mv "Packages.tmp" "Packages"
+                    echo "[SUCCESS] Downloaded package index from SourceForge ($VERSION_PATH)"
+                    echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
+                    
+                    for pkg in $MISSING_DEPS; do
+                      # Skip if already downloaded
+                      if ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
+                        continue
                       fi
-                    else
-                      echo "  [INFO] Package $pkg not found in index"
+                      # Extract filename from Packages index
+                      PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
+                      if [ -n "$PKG_FILE" ]; then
+                        PKG_URL="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/${PKG_FILE}${SF_SUFFIX}"
+                        echo "Downloading missing dependency from SourceForge: $pkg"
+                        PKG_BASENAME=$(basename "$PKG_FILE")
+                        if wget "${WGET_RETRY_OPTS[@]}" -O "$PKG_BASENAME" "$PKG_URL" 2>/dev/null && [ -s "$PKG_BASENAME" ]; then
+                          echo "  [SUCCESS] Downloaded $pkg"
+                          PREBUILT_DOWNLOADED=true
+                        else
+                          echo "  [SKIPPED] Could not download $pkg"
+                        fi
+                      else
+                        echo "  [INFO] Package $pkg not found in index"
+                      fi
+                    done
+                    
+                    # Check if we still have missing packages
+                    STILL_MISSING=""
+                    for pkg in $MISSING_DEPS; do
+                      if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
+                        STILL_MISSING="$STILL_MISSING $pkg"
+                      fi
+                    done
+                    
+                    # If we got all packages, stop trying version paths
+                    if [ -z "$STILL_MISSING" ]; then
+                      echo "[SUCCESS] All packages downloaded successfully"
+                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED afterward
+                      ALL_DOWNLOADED=true
+                      break
                     fi
-                  done
-                  
-                  # Check if we still have missing packages
-                  STILL_MISSING=""
-                  for pkg in $MISSING_DEPS; do
-                    if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
-                      STILL_MISSING="$STILL_MISSING $pkg"
-                    fi
-                  done
-                  
-                  # If we got all packages, stop trying version paths
-                  if [ -z "$STILL_MISSING" ]; then
-                    echo "[SUCCESS] All packages downloaded successfully"
                     break
+                  else
+                    echo "[INFO] Response is not a valid Packages index"
+                    rm -f "Packages.tmp"
                   fi
                 else
-                  echo "[INFO] Response is not a valid Packages index"
-                  rm -f "Packages.tmp"
+                  echo "[INFO] Could not reach SourceForge"
                 fi
-              else
-                echo "[INFO] Could not reach SourceForge"
+              done
+              if [ "$ALL_DOWNLOADED" = "true" ]; then
+                break
               fi
             done
           fi
@@ -777,7 +797,7 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          if ! ls payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk >/dev/null 2>&1; then
+          if ! compgen -G "payload/luci-app-passwall[-_]*.apk" >/dev/null; then
             echo "[ERROR] luci-app-passwall package not found in payload" >&2
             exit 1
           fi
