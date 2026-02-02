@@ -1,172 +1,193 @@
-# PassWall Installer CI
+# PassWall Installer Builder
 
-本项目基于上游开源项目 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)，使用 GitHub Actions 在 CI 中自动：
+本项目基于上游开源项目 [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)，使用 GitHub Actions 自动编译 PassWall 及其依赖，并生成自解压 `.run` 安装包。
 
-- 下载指定版本的 OpenWrt SDK；
-- 接入 openwrt-passwall 官方推荐的 feeds；
-- 编译 `luci-app-passwall` 及其依赖 IPK；
-- 将编译出的 IPK 自动填充到本仓库的 `payload/` 目录；
-- 使用 makeself 生成自解压 `.run` 安装包。
+This project is based on the upstream [Openwrt-Passwall/openwrt-passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) project and uses GitHub Actions to automatically compile PassWall and its dependencies, generating a self-extracting `.run` installer.
 
-整体行为：
+## 主要特性 | Key Features
 
-- 需要手工维护的只有 `payload/install.sh`（已根据官方 install.sh 写好）。其余 IPK 由 GitHub Actions 自动编译并放入：
-   - `payload/luci-app-passwall_*.ipk`
-   - `payload/luci-i18n-passwall-zh-cn_*.ipk`
-   - `payload/depends/*.ipk`
-- GitHub Actions 工作流位于 `.github/workflows/build-installer.yml`。
-- 每次推送 tag（如 `v26.1.21`）或手动触发 workflow 时，会在 CI 中生成形如 `PassWall_<版本号>_x86_64_all_sdk_24.10.run` 的安装包并作为构建工件（artifact）上传，并在 tag 情况下自动创建 GitHub Release 并附加该 .run 文件。
+- ✅ 自动从 OpenWrt SDK 编译 luci-app-passwall
+- ✅ 使用最新版本的 Go 和 Rust 工具链确保编译成功
+- ✅ 自动下载无法编译的依赖包
+- ✅ 生成一键安装的 `.run` 安装包
+- ✅ 支持自定义 OpenWrt SDK 版本和架构
 
-## 使用步骤
+## 快速开始 | Quick Start
 
-1. 将本目录初始化为 Git 仓库并推送到 GitHub：
-
-   ```bash
-   git init
-   git add .
-   git commit -m "init PassWall installer project"
-   git branch -M main
-   git remote add origin git@github.com:<your-account>/passwall-installer.git
-   git push -u origin main
-   ```
-
-2. 在 GitHub 仓库的 **Actions** 页面启用 workflow。
-
-3. 根据你的设备和 OpenWrt 版本，修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL` 为对应的 OpenWrt SDK 下载链接（当前默认示例为 x86_64 的 25.12.0 SDK），**无需修改 GitHub Actions 文件本身**。
-
-4. 给仓库打一个版本 tag 触发构建：
-
-   ```bash
-   git tag v26.1.21
-   git push origin v26.1.21
-   ```
-
-5. 在构建完成后，到该 workflow 的构建详情页中下载 artifact（名称类似 `PassWall_<版本号>_x86_64_all_sdk_24.10.run`）。
-
-   对于通过 tag 触发的构建，还可以在对应的 GitHub Release 页面直接下载该 `.run` 文件。
-
-## 自定义安装内容
-
-- 将你真实的程序、脚本等放到 `payload/` 目录中。
-- 编辑 `payload/install.sh`，实现实际的安装逻辑（复制文件、注册服务等）。
-
-> 提示：现有的官方 `.run` 安装包信息显示，其是使用 makeself 以 `PassWall_26.1.21_with_sdk_24.10` 作为标识字符串打包的，并在解压后执行 `./install.sh`。本项目生成的 `.run` 在这两点上与原包保持一致，你只需要确保 `payload/` 目录中的内容和你的实际发布内容匹配即可。
-
-### 与上游项目的关系
-
-- 上游源码仓库：<https://github.com/Openwrt-Passwall/openwrt-passwall>
-- 你可以按照上游 README 中的说明，在 OpenWrt 源码/SDK 中编译出 `luci-app-passwall` 及其依赖 IPK，然后将这些 IPK 拷贝到本项目的 `payload/` 中：
-   - `payload/luci-app-passwall_*.ipk`
-   - `payload/luci-i18n-passwall-zh-cn_*.ipk`
-   - `payload/depends/*.ipk`
-- 本项目的 `payload/install.sh` 已根据官方安装脚本编写，会在 OpenWrt 设备上调用 `opkg` 安装/强制重装这些 IPK，并处理部分旧依赖问题。
-- **注意**：由于某些依赖包（如 xray-core、v2ray-plugin 等）在某些 SDK 版本下编译可能失败，workflow 会自动从官方 PassWall SourceForge 发布源下载预编译包作为补充，确保所有依赖都能正确包含在最终的安装包中。本项目默认使用 OpenWrt SDK 25.12 版本以获得更新的编译工具链支持。
-
-生成的 `.run` 文件可以直接在 OpenWrt 设备上执行（详见下文"运行安装包"部分）：
+### 1. Fork 并克隆本仓库
 
 ```bash
-chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
-./PassWall_26.1.21_x86_64_all_sdk_24.10.run
+git clone https://github.com/<your-username>/passwall-run-builder.git
+cd passwall-run-builder
 ```
 
-## 依赖包说明
+### 2. 配置 OpenWrt SDK
 
-本项目生成的安装包包含以下依赖（20+ 个 IPK 文件）：
-
-- **核心代理工具**：xray-core, sing-box, v2ray-plugin, xray-plugin
-- **传输协议**：
-  - shadowsocks-libev (ss-local, ss-redir, ss-server)
-  - shadowsocks-rust (sslocal, ssserver)
-  - shadowsocksr-libev (ssr-local, ssr-redir, ssr-server)
-  - trojan-plus, hysteria, naiveproxy, tuic-client
-- **辅助工具**：chinadns-ng, dns2socks, ipt2socks, microsocks, simple-obfs-client, tcping, shadow-tls
-- **地理数据**：v2ray-geoip, v2ray-geosite, geoview
-
-这些依赖包通过以下方式获取：
-1. 优先尝试从源码编译（使用 OpenWrt SDK 25.12，Go 1.25.6 从官方源安装，Rust 工具链来自 OpenWrt 社区包 master 分支）
-2. 对于编译失败的包，自动从 SourceForge 上的官方 PassWall 预编译版本下载补充（优先使用最新版本）
-
-## Go/Rust 工具链
-
-本项目使用以下编译工具链：
-
-- **Go**: 从 Go 官方源安装 1.25.6 版本，满足 xray-core (>= 1.25.6)、v2ray-plugin (>= 1.25)、geoview、hysteria 等包的编译需求
-- **Rust**: 使用 rustup (官方 Rust 安装程序) 安装最新稳定版本，满足 shadowsocks-rust、shadow-tls 等包的编译需求
-
-通过使用最新的工具链，可以编译更多的 PassWall 依赖包，减少对预编译包的依赖。
-
-**注意**：之前尝试从 OpenWrt feeds 安装 Rust，但在 CI 环境中从源码编译 Rust 编译器耗时过长（通常超过 30 分钟）且经常失败。改用 rustup 安装预编译的 Rust 工具链可以显著提高构建速度和成功率。
-
-## 常见问题 / FAQ
-
-### 构建过程中出现 Kconfig 警告
-
-在 CI 构建过程中，你可能会看到类似如下的警告信息：
-
-```
-tmp/.config-package.in:677:warning: ignoring type redefinition of 'LUCI_LANG_zh_Hant' from 'bool' to 'tristate'
-tmp/.config-package.in:1244:warning: ignoring type redefinition of 'PACKAGE_cgi-io' from 'bool' to 'tristate'
-Config-build.in:1247:warning: defaults for choice values not supported
-```
-
-**这些警告是正常的，不会影响最终的编译结果。** 它们是 OpenWrt 的 Kconfig 配置系统在合并多个软件包的配置选项时产生的通知信息。本项目通过使用 `yes '' | make defconfig` 自动接受所有默认配置，确保 CI 构建不会在配置阶段卡住等待用户输入。
-
-### 构建失败或超时
-
-如果 GitHub Actions 构建失败或超时：
-1. 检查 OpenWrt SDK 的下载链接是否有效
-2. 查看构建日志，确认是网络问题还是编译错误
-3. 某些依赖包可能需要特定版本的 SDK，可以尝试切换 SDK 版本
-
-### 安装失败排查
-
-如果在 OpenWrt 设备上运行 `.run` 安装包时遇到问题：
-
-1. **版本检测失败**：确保 `payload/` 目录中包含正确命名的 IPK 文件
-   - `luci-app-passwall_<版本号>_all.ipk`
-   - `luci-i18n-passwall-zh-cn_<版本号>_all.ipk`
-
-2. **opkg update 失败**：
-   - 检查设备网络连接是否正常
-   - 验证 `/etc/opkg/distfeeds.conf` 中的软件源是否可访问
-   - 尝试手动运行 `opkg update` 查看详细错误
-
-3. **依赖安装失败**：
-   - 确保设备有足够的存储空间（至少 50MB 可用）
-   - 检查是否有冲突的软件包已安装
-   - 查看 `/tmp/opkg-lists/` 中的软件源列表
-
-4. **权限问题**：
-   - 确保以 root 用户运行安装脚本
-   - 检查 `/overlay` 分区是否有写权限
-
-### 运行安装包
-
-生成的 `.run` 文件在 OpenWrt 设备上的使用方法：
+编辑 `config/openwrt-sdk.conf`，设置你的设备对应的 SDK 下载链接：
 
 ```bash
-# 上传到设备后
-chmod +x PassWall_26.1.21_x86_64_all_sdk_24.10.run
+# Example for x86_64 architecture with OpenWrt 25.12
+OPENWRT_SDK_URL=https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/openwrt-sdk-25.12.0-x86-64_gcc-14.2.0_musl.Linux-x86_64.tar.zst
+```
 
-# 运行安装
-./PassWall_26.1.21_x86_64_all_sdk_24.10.run
+你可以从 [OpenWrt Downloads](https://downloads.openwrt.org/) 找到适合你设备的 SDK。
 
-# 安装完成后重启相关服务
+### 3. 触发构建
+
+推送代码或创建 tag 触发 GitHub Actions：
+
+```bash
+# 方法 1: 手动触发 (在 GitHub Actions 页面)
+# 方法 2: 推送 tag
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+### 4. 下载安装包
+
+构建完成后：
+- **Tag 触发**: 在 GitHub Release 页面下载 `.run` 文件
+- **手动触发**: 在 Actions 页面下载构建产物 (artifact)
+
+### 5. 在 OpenWrt 设备上安装
+
+```bash
+# 上传文件到 OpenWrt 设备
+scp PassWall_*.run root@openwrt:/tmp/
+
+# SSH 连接到设备
+ssh root@openwrt
+
+# 赋予执行权限并运行
+cd /tmp
+chmod +x PassWall_*.run
+./PassWall_*.run
+
+# 重启 PassWall 服务
 /etc/init.d/passwall restart
 ```
 
-## 系统要求
+## 工具链 | Toolchain
 
-### OpenWrt 设备要求
-- **架构**：与 SDK 版本匹配（如 x86_64, arm_cortex-a9, mipsel_24kc 等）
-- **固件版本**：OpenWrt 25.12 或兼容版本（24.10 也可能兼容）
-- **存储空间**：至少 50MB 可用空间用于安装所有依赖包
-- **内存**：建议至少 128MB RAM
+### Go 编译器
 
-### 构建环境要求（CI）
-- Ubuntu latest
-- 至少 2GB 可用磁盘空间用于 SDK 和编译产物
-- Go 1.25+ （用于编译 xray-core, v2ray-plugin 等）
-- Rust 工具链（用于编译 shadowsocks-rust, shadow-tls 等）
+- **版本**: 自动安装最新稳定版本
+- **用途**: 编译 xray-core, v2ray-plugin, hysteria 等 Go 包
+- **来源**: Go 官方 (https://go.dev)
 
-# passwall_run
+### Rust 编译器
+
+- **版本**: 最新稳定版本 (通过 rustup)
+- **用途**: 编译 shadowsocks-rust, shadow-tls 等 Rust 包
+- **来源**: Rust 官方 (https://rustup.rs)
+- **目标平台**: x86_64-unknown-linux-musl (OpenWrt 使用 musl libc)
+
+## 依赖包 | Dependencies
+
+本项目的安装包包含以下 PassWall 依赖 (20+ 个包)：
+
+**核心代理工具:**
+- xray-core, sing-box
+- v2ray-plugin, xray-plugin
+
+**传输协议:**
+- shadowsocks-libev (ss-local, ss-redir, ss-server)
+- shadowsocks-rust (sslocal, ssserver)
+- shadowsocksr-libev (ssr-local, ssr-redir, ssr-server)
+- trojan-plus, hysteria, naiveproxy, tuic-client
+
+**辅助工具:**
+- chinadns-ng, dns2socks, ipt2socks, microsocks
+- simple-obfs-client, tcping, shadow-tls
+
+**地理数据:**
+- v2ray-geoip, v2ray-geosite, geoview
+
+### 依赖包获取方式
+
+1. **优先编译**: 使用 OpenWrt SDK + 最新 Go/Rust 工具链从源码编译
+2. **预编译包**: 编译失败的包自动从 SourceForge 的 openwrt-passwall-build 仓库下载
+
+## 项目结构 | Project Structure
+
+```
+passwall-run-builder/
+├── .github/
+│   └── workflows/
+│       └── build-installer.yml    # GitHub Actions 构建流程
+├── config/
+│   └── openwrt-sdk.conf           # OpenWrt SDK 配置
+├── payload/
+│   ├── install.sh                 # 安装脚本
+│   └── depends/                   # 依赖包目录 (构建时自动填充)
+└── README.md
+```
+
+## 自定义安装内容 | Customization
+
+### 修改安装脚本
+
+编辑 `payload/install.sh` 来自定义安装逻辑。当前脚本会：
+1. 检测 PassWall 版本
+2. 运行 `opkg update`
+3. 强制重装/安装所有 IPK 包
+4. 清理旧依赖
+
+### 添加额外文件
+
+将需要安装的额外文件放入 `payload/` 目录，并在 `install.sh` 中添加处理逻辑。
+
+## 系统要求 | Requirements
+
+### OpenWrt 设备
+
+- **架构**: 与 SDK 版本匹配 (如 x86_64, arm_cortex-a9, mipsel_24kc 等)
+- **固件版本**: OpenWrt 24.10+ 或兼容版本
+- **存储空间**: 至少 50MB 可用空间
+- **内存**: 建议至少 128MB RAM
+
+### GitHub Actions (CI)
+
+- Ubuntu latest runner
+- 约 2GB 磁盘空间用于 SDK 和编译产物
+- 构建时间: 通常 20-40 分钟
+
+## 常见问题 | FAQ
+
+### Q: 构建过程中出现 Kconfig 警告
+
+A: 这些是正常警告，不会影响编译结果。OpenWrt 的配置系统在合并多个软件包配置时会产生这些通知。
+
+### Q: 某些包编译失败
+
+A: 工作流会自动从 SourceForge 下载预编译包作为补充。最终的 `.run` 安装包仍会包含所有必要的依赖。
+
+### Q: 如何更换 SDK 版本或架构？
+
+A: 修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL`，指向你需要的 SDK 版本。
+
+### Q: 安装时提示 opkg update 失败
+
+A: 确保 OpenWrt 设备网络连接正常，并且 `/etc/opkg/distfeeds.conf` 中的软件源可访问。
+
+### Q: 如何验证安装是否成功？
+
+A: 运行 `opkg list-installed | grep passwall` 查看已安装的 PassWall 包，然后访问 OpenWrt 的 LuCI 界面检查 PassWall 应用是否正常显示。
+
+## 与上游项目的关系 | Relation to Upstream
+
+- **上游仓库**: https://github.com/Openwrt-Passwall/openwrt-passwall
+- **本项目目的**: 提供自动化的编译和打包流程，简化 PassWall 的安装
+- **安装脚本**: 基于上游官方安装脚本编写，保持兼容性
+
+## 开源协议 | License
+
+本项目遵循上游项目的开源协议。具体请参考上游项目的 LICENSE 文件。
+
+## 贡献 | Contributing
+
+欢迎提交 Issue 和 Pull Request！
+
+## 致谢 | Acknowledgments
+
+感谢 [Openwrt-Passwall](https://github.com/Openwrt-Passwall/openwrt-passwall) 项目的开发者和维护者。

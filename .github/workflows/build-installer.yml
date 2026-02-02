@@ -36,19 +36,29 @@ jobs:
             build-essential libncurses5-dev gawk gettext unzip file \
             libssl-dev wget python3 git ca-certificates makeself zstd
 
-      - name: Install Go 1.25+
+      - name: Install Go (latest version)
         run: |
           set -e
           echo "=========================================="
-          echo "Installing Go 1.25+ for OpenWrt SDK"
+          echo "Installing latest Go for OpenWrt SDK"
           echo "=========================================="
           
-          # Download and install Go 1.25.6 from official source
+          # Download and install the latest stable Go version from official source
           # This will be used by the OpenWrt SDK build system for compiling Go packages
-          # Required for xray-core (>= 1.25.6) and v2ray-plugin (>= 1.25)
+          # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
           # NOTE: We install system Go instead of using golang from feeds because
-          # feeds only provide Go 1.23.12 which is too old for latest PassWall dependencies
-          GO_VERSION="1.25.6"
+          # feeds only provide older versions that may not meet the requirements of latest PassWall dependencies
+          
+          echo "Fetching latest Go version..."
+          GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+          
+          if [ -z "$GO_VERSION" ]; then
+            echo "[ERROR] Failed to fetch latest Go version from go.dev"
+            echo "[ERROR] Please check your internet connection or go.dev availability"
+            exit 1
+          fi
+          
+          echo "Latest Go version: ${GO_VERSION}"
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
           echo "Downloading Go ${GO_VERSION}..."
@@ -439,7 +449,7 @@ jobs:
           # All PassWall dependency packages from SourceForge
           MISSING_DEPS="$PASSWALL_DEPS"
           
-          # SourceForge mirror URLs for openwrt-passwall-build (fallback for missing deps)
+          # SourceForge mirror URLs for openwrt-passwall-build
           SF_MIRRORS="master.dl.sourceforge.net downloads.sourceforge.net netcologne.dl.sourceforge.net netix.dl.sourceforge.net"
           
           # Try SourceForge passwall-build repository for missing dependency packages
@@ -498,144 +508,6 @@ jobs:
             done
           fi
           
-          # Fallback 1: Try packages-25.12 for missing Rust packages (shadow-tls, shadowsocks-rust)
-          # These packages are often available in newer SDK versions even when not in older ones
-          RUST_PACKAGES="shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver"
-          RUST_MISSING=""
-          for pkg in $RUST_PACKAGES; do
-            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-              RUST_MISSING="$RUST_MISSING $pkg"
-            fi
-          done
-          
-          if [ -n "$RUST_MISSING" ]; then
-            echo ""
-            echo "=========================================="
-            echo "Trying packages-25.12 for Rust packages:$RUST_MISSING"
-            echo "=========================================="
-            
-            for SF_MIRROR in $SF_MIRRORS; do
-              SOURCEFORGE_INDEX_25="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-25.12/${ARCH_NAME}/passwall_packages/Packages"
-              
-              echo "Trying SourceForge packages-25.12 index: $SOURCEFORGE_INDEX_25"
-              if wget -q --timeout=60 -O "Packages-25.tmp" "$SOURCEFORGE_INDEX_25" 2>/dev/null; then
-                if [ -s "Packages-25.tmp" ] && grep -q "^Package:" "Packages-25.tmp" 2>/dev/null; then
-                  mv "Packages-25.tmp" "Packages-25"
-                  echo "[SUCCESS] Downloaded packages-25.12 index from SourceForge ($SF_MIRROR)"
-                  echo "[INFO] Packages-25.12 index contains $(grep -c '^Package:' Packages-25) packages"
-                  
-                  for pkg in $RUST_MISSING; do
-                    # Skip if already downloaded
-                    if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-                      continue
-                    fi
-                    
-                    # Extract filename from Packages index
-                    PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages-25 | grep "^Filename:" | head -1 | awk '{print $2}')
-                    if [ -n "$PKG_FILE" ]; then
-                      PKG_URL="https://${SF_MIRROR}/project/openwrt-passwall-build/releases/packages-25.12/${ARCH_NAME}/passwall_packages/${PKG_FILE}"
-                      echo "Downloading from packages-25.12: $pkg"
-                      if wget -q --timeout=60 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
-                        echo "  [SUCCESS] Downloaded $pkg from packages-25.12"
-                        PREBUILT_DOWNLOADED=true
-                      else
-                        echo "  [FAILED] Could not download $pkg from packages-25.12"
-                      fi
-                    else
-                      echo "  [INFO] Package $pkg not found in packages-25.12 index"
-                    fi
-                  done
-                  
-                  rm -f Packages-25
-                  break
-                else
-                  echo "[INFO] Response from $SF_MIRROR for packages-25.12 is not a valid Packages index"
-                  rm -f "Packages-25.tmp"
-                fi
-              else
-                echo "[INFO] Could not reach $SF_MIRROR for packages-25.12"
-              fi
-            done
-          fi
-          
-          # Fallback 2: Try openwrt-passwall.mirror SourceForge for missing PassWall dependency packages
-          # This project contains complete package archives organized by release version
-          STILL_MISSING=""
-          for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-              STILL_MISSING="$STILL_MISSING $pkg"
-            fi
-          done
-          
-          if [ -n "$STILL_MISSING" ]; then
-            echo ""
-            echo "=========================================="
-            echo "Trying openwrt-passwall.mirror for missing dependency packages:$STILL_MISSING"
-            echo "=========================================="
-            
-            # Try to get the latest release version from openwrt-passwall.mirror
-            # The releases are organized as folders like 26.1.17-1, 25.12.25-1, etc.
-            # Ordered from newest to oldest to prefer latest versions
-            RELEASE_VERSIONS="26.1.21-1 26.1.17-1 26.1.1-1 25.12.25-1 25.12.22-1 25.12.15-1"
-            
-            for SF_MIRROR in $SF_MIRRORS; do
-              echo "Checking openwrt-passwall.mirror on $SF_MIRROR..."
-              
-              for RELEASE_VER in $RELEASE_VERSIONS; do
-                # Try to download the complete packages zip for the architecture
-                ZIP_URL="https://${SF_MIRROR}/project/openwrt-passwall.mirror/${RELEASE_VER}/passwall_packages_ipk_${ARCH_NAME}.zip"
-                
-                echo "  Trying: $ZIP_URL"
-                # Download with timeout and capture exit status properly
-                wget --timeout=120 -O "packages.zip" "$ZIP_URL" 2>&1 | head -10 || true
-                
-                if [ -s "packages.zip" ] && file packages.zip | grep -q "Zip archive"; then
-                  echo "  [SUCCESS] Downloaded package archive from release $RELEASE_VER"
-                  
-                  # Extract only the missing packages
-                  mkdir -p temp_extract
-                  if unzip -q -o packages.zip -d temp_extract 2>/dev/null; then
-                    echo "  Extracting missing packages..."
-                    for pkg in $STILL_MISSING; do
-                      # Skip if already downloaded
-                      if ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-                        continue
-                      fi
-                      PKG_FILE=$(find temp_extract -name "${pkg}_*.ipk" 2>/dev/null | head -1)
-                      if [ -n "$PKG_FILE" ] && [ -f "$PKG_FILE" ]; then
-                        cp "$PKG_FILE" .
-                        echo "    [SUCCESS] Extracted $pkg from archive"
-                        PREBUILT_DOWNLOADED=true
-                      else
-                        echo "    [INFO] Package $pkg not found in archive"
-                      fi
-                    done
-                  else
-                    echo "  [ERROR] Failed to extract packages.zip"
-                  fi
-                  rm -rf temp_extract packages.zip
-                  
-                  # Check if we got all missing packages
-                  ALL_FOUND=true
-                  for pkg in $STILL_MISSING; do
-                    if ! ls "${pkg}_"*.ipk >/dev/null 2>&1; then
-                      ALL_FOUND=false
-                      break
-                    fi
-                  done
-                  
-                  if [ "$ALL_FOUND" = "true" ]; then
-                    echo "  [SUCCESS] All missing packages found in $RELEASE_VER"
-                    break 2
-                  fi
-                else
-                  echo "  [INFO] Downloaded file is not a valid zip archive, trying next version..."
-                  rm -f packages.zip
-                fi
-              done
-            done
-          fi
-          
           # Final report on missing PassWall dependency packages
           FINAL_MISSING=""
           for pkg in $PASSWALL_DEPS; do
@@ -646,8 +518,8 @@ jobs:
           
           if [ -n "$FINAL_MISSING" ]; then
             echo ""
-            echo "[WARNING] Still missing dependency packages after all fallbacks:$FINAL_MISSING"
-            echo "[INFO] These packages may not be available in any prebuilt repository"
+            echo "[WARNING] Missing dependency packages:$FINAL_MISSING"
+            echo "[INFO] These packages may not be available in the prebuilt repository"
           fi
           
           # Count downloaded packages
@@ -687,7 +559,7 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.ipk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           
-          # PassWall dependency packages (downloaded from OpenWrt official or SourceForge fallback)
+          # PassWall dependency packages (downloaded from SourceForge)
           # Note: PASSWALL_DEPS (prebuilt download list) contains packages that may need prebuilt binaries
           # DEPENDENCY_PATTERNS includes additional shadowsocks-libev and shadowsocksr-libev variants
           # that are compiled from SDK source, not downloaded as prebuilt packages
@@ -816,7 +688,7 @@ jobs:
           # DEPENDENCY_PATTERNS lists 23 PassWall dependency package patterns.
           # Go 1.25.6 and Rust are now installed system-wide from official sources.
           # Most packages should compile successfully with proper toolchains.
-          # Dependency packages are downloaded from SourceForge as fallback for compilation failures.
+          # Dependency packages are downloaded from SourceForge for compilation failures.
           # Minimum expected: 15 packages
           # With all packages compiled or downloaded: up to 23 packages
           MIN_EXPECTED_PACKAGES=15
