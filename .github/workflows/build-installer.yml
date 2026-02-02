@@ -739,7 +739,7 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}_*.apk" -o -name "${pkg_prefix}-*.apk" \) -print -quit)" ]; then
+            if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}_*.apk" -o -name "${pkg_prefix}-*.apk" \) -print -quit 2>/dev/null)" ]; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
@@ -801,12 +801,12 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) -print -quit)" ]; then
+          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) -print -quit 2>/dev/null)" ]; then
             echo "[ERROR] luci-app-passwall package not found in payload" >&2
             exit 1
           fi
           # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-i18n-passwall-zh-cn-*.apk' -o -name 'luci-i18n-passwall-zh-cn_*.apk' \) -print -quit)" ]; then
+          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-i18n-passwall-zh-cn-*.apk' -o -name 'luci-i18n-passwall-zh-cn_*.apk' \) -print -quit 2>/dev/null)" ]; then
             echo "[INFO] Chinese i18n package not found - continuing without it"
           fi
           test -d payload/depends
