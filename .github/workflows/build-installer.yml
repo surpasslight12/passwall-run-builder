@@ -444,7 +444,7 @@ jobs:
           cd prebuilt-packages
           
           PREBUILT_DOWNLOADED=false
-          WGET_OPTS="--timeout=60 --tries=2 -q"
+          WGET_RETRY_OPTS="--timeout=60 --tries=2 -q"
           
           # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
@@ -469,7 +469,8 @@ jobs:
           
           # SourceForge base URLs for openwrt-passwall-build
           # Use both SourceForge web URLs and direct download URLs to improve reliability
-          SOURCEFORGE_MIRRORS="https://sourceforge.net/projects/openwrt-passwall-build/files/releases|/download https://downloads.sourceforge.net/project/openwrt-passwall-build/releases|"
+          SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
+          SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
           
           # Version paths to try (in order of preference)
           # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
@@ -484,13 +485,13 @@ jobs:
               echo ""
               echo "Trying version path: ${VERSION_PATH}"
               
-              for SF_MIRROR in $SOURCEFORGE_MIRRORS; do
-                SF_BASE_URL="${SF_MIRROR%%|*}"
-                SF_SUFFIX="${SF_MIRROR#*|}"
+              for idx in "${!SOURCEFORGE_MIRROR_BASES[@]}"; do
+                SF_BASE_URL="${SOURCEFORGE_MIRROR_BASES[$idx]}"
+                SF_SUFFIX="${SOURCEFORGE_MIRROR_SUFFIXES[$idx]}"
                 SOURCEFORGE_INDEX="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/Packages${SF_SUFFIX}"
                 
                 echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
-                if wget $WGET_OPTS -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
+                if wget $WGET_RETRY_OPTS -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
                   # Check if the downloaded file is an actual Packages index (not HTML error page)
                   if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
                     mv "Packages.tmp" "Packages"
@@ -507,7 +508,7 @@ jobs:
                       if [ -n "$PKG_FILE" ]; then
                         PKG_URL="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/${PKG_FILE}${SF_SUFFIX}"
                         echo "Downloading missing dependency from SourceForge: $pkg"
-                        if wget $WGET_OPTS -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                        if wget $WGET_RETRY_OPTS -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
                           echo "  [SUCCESS] Downloaded $pkg"
                           PREBUILT_DOWNLOADED=true
                         else
@@ -529,6 +530,7 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
+                      # break out of both the mirror loop and version path loop
                       break 2
                     fi
                     break
