@@ -472,6 +472,10 @@ jobs:
           SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
           SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
           # NOTE: SOURCEFORGE_MIRROR_BASES and SOURCEFORGE_MIRROR_SUFFIXES indices must stay aligned.
+          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -ne "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" ]; then
+            echo "[ERROR] SourceForge mirror arrays are misaligned" >&2
+            exit 1
+          fi
           
           # Version paths to try (in order of preference)
           # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
@@ -533,7 +537,7 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
-                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED
+                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED after this loop
                       ALL_DOWNLOADED=true
                       break
                     fi
