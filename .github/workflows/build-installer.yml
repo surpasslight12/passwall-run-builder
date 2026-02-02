@@ -471,6 +471,7 @@ jobs:
           # Use both SourceForge web URLs and direct download URLs to improve reliability
           SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
           SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
+          # NOTE: SOURCEFORGE_MIRROR_BASES and SOURCEFORGE_MIRROR_SUFFIXES indices must stay aligned.
           
           # Version paths to try (in order of preference)
           # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
