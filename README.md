@@ -220,7 +220,7 @@ A: 修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL`，指向你需要�
 
 ### Q: 安装时提示 apk update 失败
 
-A: 确保 OpenWrt 设备网络连接正常，并且 `/etc/apk/repositories` 中的软件源可访问。对于 OpenWrt 25.12+，系统使用 APK 包管理器替代了 OPKG。
+A: 确保 OpenWrt 设备网络连接正常，并且 `/etc/apk/repositories` 中的软件源可访问。
 
 ### Q: 如何验证安装是否成功？
 
