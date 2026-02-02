@@ -627,9 +627,9 @@ jobs:
             local filename="$1"
             filename=$(basename "$filename")
             if echo "$filename" | grep -q '_'; then
-              echo "$filename" | sed -E 's/^[^_]*_([^_]*)(_[^_]+)?\.apk$/\1/'
+              echo "$filename" | sed -E 's/^[^_]*_(.*)\.apk$/\1/' | sed -E 's/(_all|-all)$//'
             else
-              echo "$filename" | sed -E 's/^.*-([0-9][0-9A-Za-z._+-]*)-([^-]+)\.apk$/\1/'
+              echo "$filename" | sed -E 's/^.*-([0-9][0-9A-Za-z._-]*)-([^-]+)\.apk$/\1/'
             fi
           }
           
