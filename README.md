@@ -107,8 +107,8 @@ apk search <keyword>
 
 ### 兼容性说明 | Compatibility Notes
 
-- 本安装脚本会自动检测并使用正确的包管理器命令
-- The installation script automatically detects and uses the correct package manager commands
+- 本安装脚本专为 OpenWrt 25.12+ 设计，使用 APK 包管理器
+- The installation script is designed for OpenWrt 25.12+ and uses the APK package manager
 - 对于 OpenWrt 25.12+，所有包都以 `.apk` 格式构建和安装
 - For OpenWrt 25.12+, all packages are built and installed in `.apk` format
 - 对于 OpenWrt 24.10 及更早版本，请使用项目的旧版本
