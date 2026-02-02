@@ -622,6 +622,7 @@ jobs:
 
       - name: Collect and merge packages
         working-directory: openwrt-sdk
+        shell: bash
         run: |
           set -e
           echo "=========================================="
@@ -794,6 +795,7 @@ jobs:
           echo "[SUCCESS] Package validation completed"
 
       - name: Validate payload
+        shell: bash
         run: |
           ls -l payload
           test -f payload/install.sh
