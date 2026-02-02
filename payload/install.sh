@@ -49,7 +49,8 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	# Remove existing packages first, then reinstall
 	echo "Removing existing PassWall packages..."
 	echo "正在移除现有的 PassWall 软件包..."
-	apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>&1 | grep -v "WARNING: Not deleting" || true
+	# Filter out "No such package installed" errors as they are expected if packages aren't installed
+	apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>&1 | grep -v "No such package installed" || true
 	apk add --allow-untrusted luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall reinstallation failed"
