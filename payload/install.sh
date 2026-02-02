@@ -2,8 +2,20 @@
 set -e
 
 # Extract version numbers from package filenames
-pw_pkg=$(ls luci-app-passwall-*.apk luci-app-passwall_*.apk 2>/dev/null | head -n1)
-pwzh_pkg=$(ls luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk 2>/dev/null | head -n1)
+pw_pkg=""
+pwzh_pkg=""
+for candidate in luci-app-passwall-*.apk luci-app-passwall_*.apk; do
+	if [ -e "$candidate" ]; then
+		pw_pkg="$candidate"
+		break
+	fi
+done
+for candidate in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; do
+	if [ -e "$candidate" ]; then
+		pwzh_pkg="$candidate"
+		break
+	fi
+done
 pw_ver=$(basename "$pw_pkg" | sed -E 's/^luci-app-passwall[-_]//; s/\.apk$//; s/(_all|-all)$//')
 pwzh_ver=$(basename "$pwzh_pkg" | sed -E 's/^luci-i18n-passwall-zh-cn[-_]//; s/\.apk$//; s/(_all|-all)$//')
 
