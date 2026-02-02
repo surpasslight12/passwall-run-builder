@@ -481,6 +481,7 @@ jobs:
           
           # Try SourceForge passwall-build repository for missing dependency packages
           if [ -n "$MISSING_DEPS" ]; then
+            ALL_DOWNLOADED=false
             for VERSION_PATH in $VERSION_PATHS; do
               echo ""
               echo "Trying version path: ${VERSION_PATH}"
@@ -530,8 +531,9 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
-                      # break out of the mirror loop and the version path loop
-                      break 2
+                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED
+                      ALL_DOWNLOADED=true
+                      break
                     fi
                     break
                   else
@@ -542,6 +544,9 @@ jobs:
                   echo "[INFO] Could not reach SourceForge"
                 fi
               done
+              if [ "$ALL_DOWNLOADED" = "true" ]; then
+                break
+              fi
             done
           fi
           
