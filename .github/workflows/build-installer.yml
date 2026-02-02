@@ -444,7 +444,7 @@ jobs:
           cd prebuilt-packages
           
           PREBUILT_DOWNLOADED=false
-          WGET_RETRY_OPTS=(--timeout=60 --tries=2 -q)
+          WGET_RETRY_OPTS=(--timeout=60 --tries=3 -q)
           
           # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
@@ -472,6 +472,10 @@ jobs:
           SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
           SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
           # NOTE: SOURCEFORGE_MIRROR_BASES and SOURCEFORGE_MIRROR_SUFFIXES indices must stay aligned.
+          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -eq 0 ] || [ "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" -eq 0 ]; then
+            echo "[ERROR] SourceForge mirror arrays are empty" >&2
+            exit 1
+          fi
           if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -ne "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" ]; then
             echo "[ERROR] SourceForge mirror arrays are misaligned" >&2
             exit 1
@@ -537,7 +541,7 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
-                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED after this loop
+                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED afterward
                       ALL_DOWNLOADED=true
                       break
                     fi
