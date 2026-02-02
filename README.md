@@ -97,7 +97,7 @@ chmod +x PassWall_*.run
 - trojan-plus, hysteria, naiveproxy, tuic-client
 
 **辅助工具:**
-- chinadns-ng, dns2socks, ipt2sockets, microsocks
+- chinadns-ng, dns2socks, ipt2socks, microsocks
 - simple-obfs-client, tcping, shadow-tls
 
 **地理数据:**
