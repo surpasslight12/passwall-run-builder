@@ -626,7 +626,7 @@ jobs:
           extract_version() {
             local filename="$1"
             filename=$(basename "$filename")
-            if echo "$filename" | grep -q '_.*_'; then
+            if echo "$filename" | grep -q '_[^_]*_'; then
               local base="${filename%.apk}"
               local ver="${base#*_}"
               ver="${ver%_*}"
@@ -634,7 +634,7 @@ jobs:
             else
               echo "$filename" | awk -F'-' '{
                 for (i=1;i<=NF;i++) {
-                  if ($i ~ /^[0-9]/) { start=i; break }
+                  if ($i ~ /^[0-9]([0-9]|\.).*$/) { start=i; break }
                 }
                 if (start) {
                   ver=$start
@@ -793,6 +793,30 @@ jobs:
           cd build
           # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
           # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
+          extract_version() {
+            local filename="$1"
+            filename=$(basename "$filename")
+            if echo "$filename" | grep -q '_[^_]*_'; then
+              local base="${filename%.apk}"
+              local ver="${base#*_}"
+              ver="${ver%_*}"
+              echo "$ver"
+            else
+              echo "$filename" | awk -F'-' '{
+                for (i=1;i<=NF;i++) {
+                  if ($i ~ /^[0-9]([0-9]|\.).*$/) { start=i; break }
+                }
+                if (start) {
+                  ver=$start
+                  for (j=start+1;j<=NF;j++) ver=ver "-" $j
+                  sub(/\.apk$/, "", ver)
+                  sub(/_all$/, "", ver)
+                  sub(/-all$/, "", ver)
+                  print ver
+                }
+              }'
+            fi
+          }
           PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
           PW_FULL=$(extract_version "$PW_FILE")
           PW_VER=${PW_FULL%%-*}
