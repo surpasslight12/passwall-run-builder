@@ -11,6 +11,7 @@ This project is based on the upstream [Openwrt-Passwall/openwrt-passwall](https:
 - ✅ 自动下载无法编译的依赖包
 - ✅ 生成一键安装的 `.run` 安装包
 - ✅ 支持自定义 OpenWrt SDK 版本和架构
+- ✅ 支持 OpenWrt 25.12 的 APK 包管理器（替代 OPKG）
 
 ## 快速开始 | Quick Start
 
@@ -66,6 +67,57 @@ chmod +x PassWall_*.run
 # 重启 PassWall 服务
 /etc/init.d/passwall restart
 ```
+
+## OpenWrt 25.12 APK 包管理器 | APK Package Manager
+
+**重要说明 | Important Note:**
+
+从 OpenWrt 25.12 开始，系统使用 Alpine Linux 的 APK 包管理器替代了传统的 OPKG。本项目已完全适配 APK 包管理器。
+
+Starting from OpenWrt 25.12, the system uses Alpine Linux's APK package manager instead of the traditional OPKG. This project is fully adapted for the APK package manager.
+
+### 主要变化 | Key Changes
+
+- **包格式**: 从 `.ipk` 变更为 `.apk` 格式
+- **Package format**: Changed from `.ipk` to `.apk` format
+- **安装命令**: 使用 `apk add` 替代 `opkg install`
+- **Installation command**: Use `apk add` instead of `opkg install`
+
+### APK 常用命令 | Common APK Commands
+
+```bash
+# 更新软件源 | Update repository database
+apk update
+
+# 安装软件包 | Install packages
+apk add <package-name>
+
+# 安装本地软件包（如本项目的 .run 安装包）| Install local packages
+apk add --allow-untrusted /path/to/package.apk
+
+# 删除软件包 | Remove packages
+apk del <package-name>
+
+# 列出已安装软件包 | List installed packages
+apk list -I
+
+# 搜索软件包 | Search for packages
+apk search <keyword>
+```
+
+### 兼容性说明 | Compatibility Notes
+
+- 本安装脚本专为 OpenWrt 25.12+ 设计，使用 APK 包管理器
+- The installation script is designed for OpenWrt 25.12+ and uses the APK package manager
+- 对于 OpenWrt 25.12+，所有包都以 `.apk` 格式构建和安装
+- For OpenWrt 25.12+, all packages are built and installed in `.apk` format
+- 对于 OpenWrt 24.10 及更早版本，请使用项目的旧版本
+- For OpenWrt 24.10 and earlier versions, please use older project versions
+
+### 参考资源 | Resources
+
+- [OpenWrt APK 官方文档 | Official APK Documentation](https://openwrt.org/docs/guide-user/additional-software/apk)
+- [OPKG 到 APK 命令对照表 | OPKG to APK Cheatsheet](https://openwrt.org/docs/guide-user/additional-software/opkg-to-apk-cheatsheet)
 
 ## 工具链 | Toolchain
 
@@ -129,8 +181,8 @@ passwall-run-builder/
 
 编辑 `payload/install.sh` 来自定义安装逻辑。当前脚本会：
 1. 检测 PassWall 版本
-2. 运行 `opkg update`
-3. 强制重装/安装所有 IPK 包
+2. 运行 `apk update`（OpenWrt 25.12+）
+3. 强制重装/安装所有 APK 包
 4. 清理旧依赖
 
 ### 添加额外文件
@@ -142,7 +194,7 @@ passwall-run-builder/
 ### OpenWrt 设备
 
 - **架构**: 与 SDK 版本匹配 (如 x86_64, arm_cortex-a9, mipsel_24kc 等)
-- **固件版本**: OpenWrt 24.10+ 或兼容版本
+- **固件版本**: OpenWrt 25.12+ (使用 APK 包管理器)
 - **存储空间**: 至少 50MB 可用空间
 - **内存**: 建议至少 128MB RAM
 
@@ -166,13 +218,17 @@ A: 工作流会自动从 SourceForge 下载预编译包作为补充。最终的 
 
 A: 修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL`，指向你需要的 SDK 版本。
 
-### Q: 安装时提示 opkg update 失败
+### Q: 安装时提示 apk update 失败
 
-A: 确保 OpenWrt 设备网络连接正常，并且 `/etc/opkg/distfeeds.conf` 中的软件源可访问。
+A: 确保 OpenWrt 设备网络连接正常，并且 `/etc/apk/repositories` 中的软件源可访问。
 
 ### Q: 如何验证安装是否成功？
 
-A: 运行 `opkg list-installed | grep passwall` 查看已安装的 PassWall 包，然后访问 OpenWrt 的 LuCI 界面检查 PassWall 应用是否正常显示。
+A: 运行 `apk list -I | grep passwall` 查看已安装的 PassWall 包，然后访问 OpenWrt 的 LuCI 界面检查 PassWall 应用是否正常显示。
+
+### Q: 是否支持旧版本 OpenWrt (24.10 及更早版本)？
+
+A: 本项目针对 OpenWrt 25.12+ 优化，使用 APK 包管理器。如需在使用 OPKG 的旧版本 OpenWrt 上使用，请使用项目的旧版本或自行修改安装脚本。
 
 ## 与上游项目的关系 | Relation to Upstream
 
