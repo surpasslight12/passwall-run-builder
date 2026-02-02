@@ -444,6 +444,7 @@ jobs:
           cd prebuilt-packages
           
           PREBUILT_DOWNLOADED=false
+          WGET_OPTS="--timeout=60 --tries=2 -q"
           
           # PassWall dependency packages - download from SourceForge prebuilt repositories
           # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
@@ -472,16 +473,14 @@ jobs:
           
           # Version paths to try (in order of preference)
           # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
-          VERSION_PATHS="packages-${SDK_VERSION_FULL} packages-${SDK_VERSION} snapshots/packages"
+          VERSION_PATHS="packages-${SDK_VERSION} snapshots/packages"
+          if [ -n "$SDK_VERSION_FULL" ] && [ "$SDK_VERSION_FULL" != "$SDK_VERSION" ]; then
+            VERSION_PATHS="packages-${SDK_VERSION_FULL} $VERSION_PATHS"
+          fi
           
           # Try SourceForge passwall-build repository for missing dependency packages
           if [ -n "$MISSING_DEPS" ]; then
-            FOUND_WORKING_REPO=false
             for VERSION_PATH in $VERSION_PATHS; do
-              if [ "$FOUND_WORKING_REPO" = "true" ]; then
-                break
-              fi
-              
               echo ""
               echo "Trying version path: ${VERSION_PATH}"
               
@@ -491,13 +490,12 @@ jobs:
                 SOURCEFORGE_INDEX="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/Packages${SF_SUFFIX}"
                 
                 echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
-                if wget -q --timeout=60 --tries=2 -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
+                if wget $WGET_OPTS -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
                   # Check if the downloaded file is an actual Packages index (not HTML error page)
                   if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
                     mv "Packages.tmp" "Packages"
                     echo "[SUCCESS] Downloaded package index from SourceForge ($VERSION_PATH)"
                     echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
-                    FOUND_WORKING_REPO=true
                     
                     for pkg in $MISSING_DEPS; do
                       # Skip if already downloaded
@@ -509,7 +507,7 @@ jobs:
                       if [ -n "$PKG_FILE" ]; then
                         PKG_URL="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/${PKG_FILE}${SF_SUFFIX}"
                         echo "Downloading missing dependency from SourceForge: $pkg"
-                        if wget -q --timeout=60 --tries=2 -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
+                        if wget $WGET_OPTS -O "$(basename "$PKG_FILE")" "$PKG_URL" 2>/dev/null && [ -s "$(basename "$PKG_FILE")" ]; then
                           echo "  [SUCCESS] Downloaded $pkg"
                           PREBUILT_DOWNLOADED=true
                         else
@@ -531,7 +529,7 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
-                      break
+                      break 2
                     fi
                     break
                   else
