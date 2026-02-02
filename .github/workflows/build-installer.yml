@@ -622,6 +622,7 @@ jobs:
 
       - name: Collect and merge packages
         working-directory: openwrt-sdk
+        # Use bash for compgen glob checks in this step.
         shell: bash
         run: |
           set -e
@@ -738,7 +739,8 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}[-_]*.apk" >/dev/null; then
+            if ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk >/dev/null && \
+              ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk >/dev/null; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
@@ -795,6 +797,7 @@ jobs:
           echo "[SUCCESS] Package validation completed"
 
       - name: Validate payload
+        # Use bash for compgen glob checks in this step.
         shell: bash
         run: |
           ls -l payload
@@ -804,7 +807,8 @@ jobs:
             exit 1
           fi
           # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if ! compgen -G "payload/luci-i18n-passwall-zh-cn[-_]*.apk" >/dev/null; then
+          if ! compgen -G "payload/luci-i18n-passwall-zh-cn-"*.apk >/dev/null && \
+            ! compgen -G "payload/luci-i18n-passwall-zh-cn_"*.apk >/dev/null; then
             echo "[INFO] Chinese i18n package not found - continuing without it"
           fi
           test -d payload/depends
