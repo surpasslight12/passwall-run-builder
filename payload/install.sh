@@ -19,10 +19,20 @@ done
 pw_ver=""
 pwzh_ver=""
 if [ -n "$pw_pkg" ]; then
-	pw_ver=$(basename "$pw_pkg" | sed -E 's/^luci-app-passwall[-_]//; s/\.apk$//; s/(_all|-all)$//')
+	pw_base=$(basename "$pw_pkg" | sed -E 's/^luci-app-passwall[-_]//; s/\.apk$//')
+	if echo "$pw_base" | grep -q '_'; then
+		pw_ver="${pw_base%_*}"
+	else
+		pw_ver="${pw_base%-all}"
+	fi
 fi
 if [ -n "$pwzh_pkg" ]; then
-	pwzh_ver=$(basename "$pwzh_pkg" | sed -E 's/^luci-i18n-passwall-zh-cn[-_]//; s/\.apk$//; s/(_all|-all)$//')
+	pwzh_base=$(basename "$pwzh_pkg" | sed -E 's/^luci-i18n-passwall-zh-cn[-_]//; s/\.apk$//')
+	if echo "$pwzh_base" | grep -q '_'; then
+		pwzh_ver="${pwzh_base%_*}"
+	else
+		pwzh_ver="${pwzh_base%-all}"
+	fi
 fi
 
 # Validate versions were extracted successfully
