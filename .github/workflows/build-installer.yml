@@ -739,8 +739,7 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk >/dev/null && \
-              ! compgen -G "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk >/dev/null; then
+            if [ -z "$(ls -1 "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk 2>/dev/null)" ]; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
@@ -802,13 +801,12 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          if ! compgen -G "payload/luci-app-passwall[-_]*.apk" >/dev/null; then
+          if [ -z "$(ls payload/luci-app-passwall[-_]*.apk 2>/dev/null)" ]; then
             echo "[ERROR] luci-app-passwall package not found in payload" >&2
             exit 1
           fi
           # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if ! compgen -G "payload/luci-i18n-passwall-zh-cn-"*.apk >/dev/null && \
-            ! compgen -G "payload/luci-i18n-passwall-zh-cn_"*.apk >/dev/null; then
+          if [ -z "$(ls payload/luci-i18n-passwall-zh-cn-*.apk payload/luci-i18n-passwall-zh-cn_*.apk 2>/dev/null)" ]; then
             echo "[INFO] Chinese i18n package not found - continuing without it"
           fi
           test -d payload/depends
