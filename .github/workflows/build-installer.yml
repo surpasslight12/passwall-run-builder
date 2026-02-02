@@ -498,7 +498,7 @@ jobs:
                   
                   for pkg in $MISSING_DEPS; do
                     # Skip if already downloaded
-                    if ls "${pkg}_"*.apk >/dev/null 2>&1; then
+                    if ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
                       continue
                     fi
                     # Extract filename from Packages index
@@ -520,7 +520,7 @@ jobs:
                   # Check if we still have missing packages
                   STILL_MISSING=""
                   for pkg in $MISSING_DEPS; do
-                    if ! ls "${pkg}_"*.apk >/dev/null 2>&1; then
+                    if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
                       STILL_MISSING="$STILL_MISSING $pkg"
                     fi
                   done
@@ -543,7 +543,7 @@ jobs:
           # Final report on missing PassWall dependency packages
           FINAL_MISSING=""
           for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.apk >/dev/null 2>&1; then
+            if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
               FINAL_MISSING="$FINAL_MISSING $pkg"
             fi
           done
@@ -572,6 +572,34 @@ jobs:
           
           echo "PREBUILT_DOWNLOADED=$PREBUILT_DOWNLOADED" >> $GITHUB_ENV
 
+      - name: Prepare version parser
+        run: |
+          cat > "$GITHUB_WORKSPACE/extract-version.sh" <<'SH'
+          extract_version() {
+            local filename="$1"
+            local prefix="$2"
+            filename=$(basename "$filename")
+            local base="${filename%.apk}"
+            if [ -n "$prefix" ]; then
+              base="${base#${prefix}}"
+              base="${base#-}"
+              base="${base#_}"
+            fi
+            if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
+              base="${base%_${ARCH_NAME}}"
+            elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
+              base="${base%-${ARCH_NAME}}"
+            elif printf "%s" "$base" | grep -q -- '_all$'; then
+              base="${base%_all}"
+            elif printf "%s" "$base" | grep -q -- '-all$'; then
+              base="${base%-all}"
+            elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
+              base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
+            fi
+            echo "$base"
+          }
+          SH
+
       - name: Collect and merge packages
         working-directory: openwrt-sdk
         run: |
@@ -588,8 +616,8 @@ jobs:
             echo "Prebuilt packages available: $(ls -1 "$GITHUB_WORKSPACE/prebuilt-staging/" | wc -l)"
           fi
           
-          find bin/packages -name "luci-app-passwall_*.apk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
-          find bin/packages -name "luci-i18n-passwall-zh-cn_*.apk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || echo "[INFO] Chinese i18n package not found (non-critical)"
+          find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
+          find bin/packages \( -name "luci-i18n-passwall-zh-cn-*.apk" -o -name "luci-i18n-passwall-zh-cn_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || echo "[INFO] Chinese i18n package not found (non-critical)"
           
           echo "Main packages collected:"
           ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || echo "  No main packages found"
@@ -610,8 +638,10 @@ jobs:
           echo "Directory structure:"
           find bin/packages -type d | head -10
           
+          source "$GITHUB_WORKSPACE/extract-version.sh"
+
           for pkg_name in $DEPENDENCY_PATTERNS; do
-            find bin/packages -type f -name "${pkg_name}_*.apk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
+            find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
           done
           
           echo "Built packages found: $(find "$GITHUB_WORKSPACE/built-packages/" -name "*.apk" 2>/dev/null | wc -l)"
@@ -621,12 +651,6 @@ jobs:
             local ver2="$2"
             local highest=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
             [ "$ver1" = "$highest" ]
-          }
-          
-          extract_version() {
-            local filename="$1"
-            filename=$(basename "$filename")
-            echo "$filename" | sed 's/^[^_]*_\([^_]*\)_.*/\1/'
           }
           
           echo ""
@@ -644,18 +668,18 @@ jobs:
             SELECTED=""
             SOURCE=""
             
-            for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.apk; do
+            for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}-"*.apk; do
               if [ -e "$f" ]; then
                 BUILT_PKG="$f"
-                BUILT_VER=$(extract_version "$f")
+                BUILT_VER=$(extract_version "$f" "$pkg_prefix")
                 break
               fi
             done
             
-            for f in "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}_"*.apk; do
+            for f in "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}-"*.apk; do
               if [ -e "$f" ]; then
                 PREBUILT_PKG="$f"
-                PREBUILT_VER=$(extract_version "$f")
+                PREBUILT_VER=$(extract_version "$f" "$pkg_prefix")
                 break
               fi
             done
@@ -693,7 +717,7 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if ! ls "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk 1>/dev/null 2>&1; then
+            if ! ls "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk 1>/dev/null 2>&1; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
@@ -753,9 +777,12 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          test -f payload/luci-app-passwall_*.apk
+          if ! ls payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk >/dev/null 2>&1; then
+            echo "[ERROR] luci-app-passwall package not found in payload" >&2
+            exit 1
+          fi
           # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if ! ls payload/luci-i18n-passwall-zh-cn_*.apk 1>/dev/null 2>&1; then
+          if ! ls payload/luci-i18n-passwall-zh-cn-*.apk payload/luci-i18n-passwall-zh-cn_*.apk 1>/dev/null 2>&1; then
             echo "[WARNING] Chinese i18n package not found - this is non-critical"
           fi
           test -d payload/depends
@@ -771,7 +798,13 @@ jobs:
           cd build
           # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
           # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
-          PW_FULL=$(ls payload | grep 'luci-app-passwall_' | head -n1 | awk -F'[_]' '{print $2}')
+          source "$GITHUB_WORKSPACE/extract-version.sh"
+          PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
+          if [ -z "$PW_FILE" ]; then
+            echo "[ERROR] luci-app-passwall package not found in payload" >&2
+            exit 1
+          fi
+          PW_FULL=$(extract_version "$PW_FILE" "luci-app-passwall")
           PW_VER=${PW_FULL%%-*}
           # 从 OPENWRT_SDK_URL 提取架构与 SDK 版本
           ARCH_SEG=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+/[^/]\+\)/.*#\1#p')

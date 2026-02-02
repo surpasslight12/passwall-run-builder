@@ -2,17 +2,47 @@
 set -e
 
 # Extract version numbers from package filenames
-pw_ver=`ls | grep luci-app | awk -F'[_]' '{print $2}'`
-pwzh_ver=`ls | grep luci-i18n | awk -F'[_]' '{print $2}'`
+pw_pkg=""
+pwzh_pkg=""
+for candidate in luci-app-passwall-*.apk luci-app-passwall_*.apk; do
+	if [ -e "$candidate" ]; then
+		pw_pkg="$candidate"
+		break
+	fi
+done
+for candidate in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; do
+	if [ -e "$candidate" ]; then
+		pwzh_pkg="$candidate"
+		break
+	fi
+done
+pw_ver=""
+pwzh_ver=""
+if [ -n "$pw_pkg" ]; then
+	pw_base=$(basename "$pw_pkg" | sed -E 's/^luci-app-passwall[-_]//; s/\.apk$//')
+	if echo "$pw_base" | grep -q '_'; then
+		pw_ver="${pw_base%_*}"
+	else
+		pw_ver="${pw_base%-all}"
+	fi
+fi
+if [ -n "$pwzh_pkg" ]; then
+	pwzh_base=$(basename "$pwzh_pkg" | sed -E 's/^luci-i18n-passwall-zh-cn[-_]//; s/\.apk$//')
+	if echo "$pwzh_base" | grep -q '_'; then
+		pwzh_ver="${pwzh_base%_*}"
+	else
+		pwzh_ver="${pwzh_base%-all}"
+	fi
+fi
 
 # Validate versions were extracted successfully
-if [ -z "$pw_ver" ]; then
+if [ -z "$pw_pkg" ] || [ -z "$pw_ver" ]; then
 	echo "ERROR: Failed to detect luci-app-passwall version"
 	echo "错误：无法检测到 luci-app-passwall 版本"
 	exit 1
 fi
 
-if [ -z "$pwzh_ver" ]; then
+if [ -z "$pwzh_pkg" ] || [ -z "$pwzh_ver" ]; then
 	echo "ERROR: Failed to detect luci-i18n-passwall-zh-cn version"
 	echo "错误：无法检测到 luci-i18n-passwall-zh-cn 版本"
 	exit 1
@@ -55,7 +85,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 			apk del "$pkg"
 		fi
 	done
-	apk add --allow-untrusted luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
+	apk add --allow-untrusted "$pw_pkg" "$pwzh_pkg" depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
@@ -64,7 +94,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 else
 	echo "Installing PassWall $pw_ver"
 	echo "正在安装 PassWall $pw_ver"
-	apk add --allow-untrusted luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
+	apk add --allow-untrusted "$pw_pkg" "$pwzh_pkg" depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall installation failed"
 		echo "错误：PassWall 安装失败"
