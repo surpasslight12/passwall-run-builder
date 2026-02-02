@@ -374,14 +374,8 @@ jobs:
           
           echo ""
           echo "=========================================="
-          echo "Installing/indexing compiled packages"
+          echo "Skipping global package install/index to avoid building unrelated packages"
           echo "=========================================="
-          # Install all compiled packages to create .apk files in bin/packages
-          make package/install V=s || {
-            echo "[WARNING] Some packages failed to install, continuing..."
-          }
-          # Create package index
-          make package/index V=s || true
           
           # List what was actually built
           echo ""
