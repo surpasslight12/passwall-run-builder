@@ -372,6 +372,22 @@ jobs:
           echo "--- Building: luci-i18n-passwall-zh-cn ---"
           make package/luci-i18n-passwall-zh-cn/compile -j"$(nproc)" || true
           
+          echo ""
+          echo "=========================================="
+          echo "Installing/indexing compiled packages"
+          echo "=========================================="
+          # Install all compiled packages to create .apk files in bin/packages
+          make package/install V=s || {
+            echo "[WARNING] Some packages failed to install, continuing..."
+          }
+          # Create package index
+          make package/index V=s || true
+          
+          # List what was actually built
+          echo ""
+          echo "Checking built packages:"
+          find bin/packages -name "*.apk" -type f | head -20 || echo "No .apk files found"
+          
           echo "[SUCCESS] Dependency package compilation completed"
 
       - name: Download prebuilt packages
@@ -576,6 +592,9 @@ jobs:
           find bin/packages -name "luci-app-passwall_*.apk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages -name "luci-i18n-passwall-zh-cn_*.apk" -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || echo "[INFO] Chinese i18n package not found (non-critical)"
           
+          echo "Main packages collected:"
+          ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || echo "  No main packages found"
+          
           # PassWall dependency packages (downloaded from SourceForge)
           # Note: PASSWALL_DEPS (prebuilt download list) contains packages that may need prebuilt binaries
           # DEPENDENCY_PATTERNS includes additional shadowsocks-libev and shadowsocksr-libev variants
@@ -586,6 +605,11 @@ jobs:
             shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server \
             simple-obfs-client sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
+          
+          echo ""
+          echo "Searching for dependency packages in bin/packages..."
+          echo "Directory structure:"
+          find bin/packages -type d | head -10
           
           for pkg_name in $DEPENDENCY_PATTERNS; do
             find bin/packages -type f -name "${pkg_name}_*.apk" -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
