@@ -530,7 +530,7 @@ jobs:
                     # If we got all packages, stop trying version paths
                     if [ -z "$STILL_MISSING" ]; then
                       echo "[SUCCESS] All packages downloaded successfully"
-                      # break out of both the mirror loop and version path loop
+                      # break out of the mirror loop and the version path loop
                       break 2
                     fi
                     break
@@ -782,7 +782,7 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          if ! compgen -G "payload/luci-app-passwall-*.apk" >/dev/null && ! compgen -G "payload/luci-app-passwall_*.apk" >/dev/null; then
+          if ! compgen -G "payload/luci-app-passwall[-_]*.apk" >/dev/null; then
             echo "[ERROR] luci-app-passwall package not found in payload" >&2
             exit 1
           fi
