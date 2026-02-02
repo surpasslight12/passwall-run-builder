@@ -622,7 +622,11 @@ jobs:
               base="${base#-}"
               base="${base#_}"
             fi
-            if printf "%s" "$base" | grep -q -- '_all$'; then
+            if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
+              base="${base%_${ARCH_NAME}}"
+            elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
+              base="${base%-${ARCH_NAME}}"
+            elif printf "%s" "$base" | grep -q -- '_all$'; then
               base="${base%_all}"
             elif printf "%s" "$base" | grep -q -- '-all$'; then
               base="${base%-all}"
@@ -792,11 +796,35 @@ jobs:
           cd build
           # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
           # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
-          if [ ! -f "$GITHUB_WORKSPACE/extract-version.sh" ]; then
-            echo "[ERROR] extract-version.sh not found in workspace" >&2
-            exit 1
+          EXTRACT_VERSION_SCRIPT="$GITHUB_WORKSPACE/extract-version.sh"
+          if [ ! -f "$EXTRACT_VERSION_SCRIPT" ]; then
+            cat > "$EXTRACT_VERSION_SCRIPT" <<'SH'
+            extract_version() {
+              local filename="$1"
+              local prefix="$2"
+              filename=$(basename "$filename")
+              local base="${filename%.apk}"
+              if [ -n "$prefix" ]; then
+                base="${base#${prefix}}"
+                base="${base#-}"
+                base="${base#_}"
+              fi
+              if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
+                base="${base%_${ARCH_NAME}}"
+              elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
+                base="${base%-${ARCH_NAME}}"
+              elif printf "%s" "$base" | grep -q -- '_all$'; then
+                base="${base%_all}"
+              elif printf "%s" "$base" | grep -q -- '-all$'; then
+                base="${base%-all}"
+              elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
+                base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
+              fi
+              echo "$base"
+            }
+            SH
           fi
-          source "$GITHUB_WORKSPACE/extract-version.sh"
+          source "$EXTRACT_VERSION_SCRIPT"
           PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
           PW_FULL=$(extract_version "$PW_FILE" "luci-app-passwall")
           PW_VER=${PW_FULL%%-*}
