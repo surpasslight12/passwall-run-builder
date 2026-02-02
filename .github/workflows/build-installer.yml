@@ -680,7 +680,7 @@ jobs:
           DEP_COUNT=$(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.apk" | wc -l)
           
           if [ "$DEP_COUNT" -eq 0 ]; then
-            echo "[ERROR] No dependency IPK files found in payload/depends" >&2
+            echo "[ERROR] No dependency APK files found in payload/depends" >&2
             exit 1
           fi
           

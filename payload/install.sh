@@ -41,10 +41,14 @@ if apk list -I libsodium | grep -Eq "\d.\d.\d{2}-\d" || apk list -I boost | grep
 fi
 
 # Install PassWall packages
+# Note: For local .apk files, apk add --allow-untrusted will reinstall if the package already exists
+# This is the proper way to handle local packages in APK, as apk fix --reinstall is for repo packages
 if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	echo "Same version detected, performing forced reinstallation of PassWall $pw_ver"
 	echo "发现相同版本，正在执行强制重新安装 PassWall $pw_ver"
-	apk add --allow-untrusted --force-reinstall luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
+	# Remove existing packages first, then reinstall
+	apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>/dev/null || true
+	apk add --allow-untrusted luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
