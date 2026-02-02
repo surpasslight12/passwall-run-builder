@@ -739,7 +739,7 @@ jobs:
           echo "=========================================="
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if [ -z "$(ls -1 "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk 2>/dev/null)" ]; then
+            if [ -z "$(ls "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}-"*.apk 2>/dev/null)" ]; then
               MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
@@ -801,7 +801,7 @@ jobs:
         run: |
           ls -l payload
           test -f payload/install.sh
-          if [ -z "$(ls payload/luci-app-passwall[-_]*.apk 2>/dev/null)" ]; then
+          if [ -z "$(ls payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk 2>/dev/null)" ]; then
             echo "[ERROR] luci-app-passwall package not found in payload" >&2
             exit 1
           fi
