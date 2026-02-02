@@ -610,6 +610,30 @@ jobs:
           echo "Directory structure:"
           find bin/packages -type d | head -10
           
+          EXTRACT_VERSION_SCRIPT="$GITHUB_WORKSPACE/extract-version.sh"
+          cat > "$EXTRACT_VERSION_SCRIPT" <<'SH'
+          extract_version() {
+            local filename="$1"
+            local prefix="$2"
+            filename=$(basename "$filename")
+            local base="${filename%.apk}"
+            if [ -n "$prefix" ]; then
+              base="${base#${prefix}}"
+              base="${base#-}"
+              base="${base#_}"
+            fi
+            if printf "%s" "$base" | grep -q -- '_all$'; then
+              base="${base%_all}"
+            elif printf "%s" "$base" | grep -q -- '-all$'; then
+              base="${base%-all}"
+            elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
+              base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
+            fi
+            echo "$base"
+          }
+          SH
+          source "$EXTRACT_VERSION_SCRIPT"
+
           for pkg_name in $DEPENDENCY_PATTERNS; do
             find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
           done
@@ -621,31 +645,6 @@ jobs:
             local ver2="$2"
             local highest=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
             [ "$ver1" = "$highest" ]
-          }
-          
-          extract_version() {
-            local filename="$1"
-            filename=$(basename "$filename")
-            if echo "$filename" | grep -q '_[^_]*_'; then
-              local base="${filename%.apk}"
-              local ver="${base#*_}"
-              ver="${ver%_*}"
-              echo "$ver"
-            else
-              echo "$filename" | awk -F'-' '{
-                for (i=1;i<=NF;i++) {
-                  if ($i ~ /^[0-9]([0-9]|\.).*$/) { start=i; break }
-                }
-                if (start) {
-                  ver=$start
-                  for (j=start+1;j<=NF;j++) ver=ver "-" $j
-                  sub(/\.apk$/, "", ver)
-                  sub(/_all$/, "", ver)
-                  sub(/-all$/, "", ver)
-                  print ver
-                }
-              }'
-            fi
           }
           
           echo ""
@@ -666,7 +665,7 @@ jobs:
             for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}-"*.apk; do
               if [ -e "$f" ]; then
                 BUILT_PKG="$f"
-                BUILT_VER=$(extract_version "$f")
+                BUILT_VER=$(extract_version "$f" "$pkg_prefix")
                 break
               fi
             done
@@ -674,7 +673,7 @@ jobs:
             for f in "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}-"*.apk; do
               if [ -e "$f" ]; then
                 PREBUILT_PKG="$f"
-                PREBUILT_VER=$(extract_version "$f")
+                PREBUILT_VER=$(extract_version "$f" "$pkg_prefix")
                 break
               fi
             done
@@ -793,32 +792,13 @@ jobs:
           cd build
           # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
           # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
-          extract_version() {
-            local filename="$1"
-            filename=$(basename "$filename")
-            if echo "$filename" | grep -q '_[^_]*_'; then
-              local base="${filename%.apk}"
-              local ver="${base#*_}"
-              ver="${ver%_*}"
-              echo "$ver"
-            else
-              echo "$filename" | awk -F'-' '{
-                for (i=1;i<=NF;i++) {
-                  if ($i ~ /^[0-9]([0-9]|\.).*$/) { start=i; break }
-                }
-                if (start) {
-                  ver=$start
-                  for (j=start+1;j<=NF;j++) ver=ver "-" $j
-                  sub(/\.apk$/, "", ver)
-                  sub(/_all$/, "", ver)
-                  sub(/-all$/, "", ver)
-                  print ver
-                }
-              }'
-            fi
-          }
+          if [ ! -f "$GITHUB_WORKSPACE/extract-version.sh" ]; then
+            echo "[ERROR] extract-version.sh not found in workspace" >&2
+            exit 1
+          fi
+          source "$GITHUB_WORKSPACE/extract-version.sh"
           PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
-          PW_FULL=$(extract_version "$PW_FILE")
+          PW_FULL=$(extract_version "$PW_FILE" "luci-app-passwall")
           PW_VER=${PW_FULL%%-*}
           # 从 OPENWRT_SDK_URL 提取架构与 SDK 版本
           ARCH_SEG=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+/[^/]\+\)/.*#\1#p')
