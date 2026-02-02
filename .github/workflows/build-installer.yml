@@ -572,6 +572,34 @@ jobs:
           
           echo "PREBUILT_DOWNLOADED=$PREBUILT_DOWNLOADED" >> $GITHUB_ENV
 
+      - name: Prepare version parser
+        run: |
+          cat > "$GITHUB_WORKSPACE/extract-version.sh" <<'SH'
+          extract_version() {
+            local filename="$1"
+            local prefix="$2"
+            filename=$(basename "$filename")
+            local base="${filename%.apk}"
+            if [ -n "$prefix" ]; then
+              base="${base#${prefix}}"
+              base="${base#-}"
+              base="${base#_}"
+            fi
+            if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
+              base="${base%_${ARCH_NAME}}"
+            elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
+              base="${base%-${ARCH_NAME}}"
+            elif printf "%s" "$base" | grep -q -- '_all$'; then
+              base="${base%_all}"
+            elif printf "%s" "$base" | grep -q -- '-all$'; then
+              base="${base%-all}"
+            elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
+              base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
+            fi
+            echo "$base"
+          }
+          SH
+
       - name: Collect and merge packages
         working-directory: openwrt-sdk
         run: |
@@ -610,33 +638,7 @@ jobs:
           echo "Directory structure:"
           find bin/packages -type d | head -10
           
-          EXTRACT_VERSION_SCRIPT="$GITHUB_WORKSPACE/extract-version.sh"
-          cat > "$EXTRACT_VERSION_SCRIPT" <<'SH'
-          extract_version() {
-            local filename="$1"
-            local prefix="$2"
-            filename=$(basename "$filename")
-            local base="${filename%.apk}"
-            if [ -n "$prefix" ]; then
-              base="${base#${prefix}}"
-              base="${base#-}"
-              base="${base#_}"
-            fi
-            if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
-              base="${base%_${ARCH_NAME}}"
-            elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
-              base="${base%-${ARCH_NAME}}"
-            elif printf "%s" "$base" | grep -q -- '_all$'; then
-              base="${base%_all}"
-            elif printf "%s" "$base" | grep -q -- '-all$'; then
-              base="${base%-all}"
-            elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
-              base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
-            fi
-            echo "$base"
-          }
-          SH
-          source "$EXTRACT_VERSION_SCRIPT"
+          source "$GITHUB_WORKSPACE/extract-version.sh"
 
           for pkg_name in $DEPENDENCY_PATTERNS; do
             find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
@@ -796,35 +798,7 @@ jobs:
           cd build
           # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
           # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
-          EXTRACT_VERSION_SCRIPT="$GITHUB_WORKSPACE/extract-version.sh"
-          if [ ! -f "$EXTRACT_VERSION_SCRIPT" ]; then
-            cat > "$EXTRACT_VERSION_SCRIPT" <<'SH'
-            extract_version() {
-              local filename="$1"
-              local prefix="$2"
-              filename=$(basename "$filename")
-              local base="${filename%.apk}"
-              if [ -n "$prefix" ]; then
-                base="${base#${prefix}}"
-                base="${base#-}"
-                base="${base#_}"
-              fi
-              if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
-                base="${base%_${ARCH_NAME}}"
-              elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
-                base="${base%-${ARCH_NAME}}"
-              elif printf "%s" "$base" | grep -q -- '_all$'; then
-                base="${base%_all}"
-              elif printf "%s" "$base" | grep -q -- '-all$'; then
-                base="${base%-all}"
-              elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
-                base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
-              fi
-              echo "$base"
-            }
-            SH
-          fi
-          source "$EXTRACT_VERSION_SCRIPT"
+          source "$GITHUB_WORKSPACE/extract-version.sh"
           PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
           PW_FULL=$(extract_version "$PW_FILE" "luci-app-passwall")
           PW_VER=${PW_FULL%%-*}
