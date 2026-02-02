@@ -22,7 +22,7 @@ echo "Detected PassWall version: $pw_ver"
 echo "检测到 PassWall 版本：$pw_ver"
 
 # Update package lists
-opkg update
+apk update
 if [ $? -ne 0 ]; then
 	echo "ERROR: Failed to update package lists. Please check network connection and repository configuration."
 	echo "错误：更新软件源列表失败，请检查路由器网络连接以及软件源配置。"
@@ -30,10 +30,10 @@ if [ $? -ne 0 ]; then
 fi
 
 # Check for and update legacy dependencies from older firmware versions
-if opkg list-installed libsodium | grep -Eq "\d.\d.\d{2}-\d" || opkg list-installed boost | grep -Eq "\d.\d{2}.\d-\d"; then
+if apk list -I libsodium | grep -Eq "\d.\d.\d{2}-\d" || apk list -I boost | grep -Eq "\d.\d{2}.\d-\d"; then
 	echo "Detected legacy dependency versions from firmware upgrade, updating dependencies..."
 	echo "检测到旧版本固件升级保留的依赖版本问题，正在更新相关依赖..."
-	opkg install libev libsodium libudns boost boost-system boost-program_options libltdl7 liblua5.3-5.3 libcares coreutils-base64 coreutils-nohup
+	apk add libev libsodium libudns boost boost-system boost-program_options libltdl7 liblua5.3-5.3 libcares coreutils-base64 coreutils-nohup
 	if [ $? -ne 0 ]; then
 		echo "WARNING: Some dependencies may have failed to update. Installation will continue..."
 		echo "警告：部分依赖更新可能失败。安装将继续..."
@@ -41,10 +41,10 @@ if opkg list-installed libsodium | grep -Eq "\d.\d.\d{2}-\d" || opkg list-instal
 fi
 
 # Install PassWall packages
-if opkg list-installed luci-app-passwall | grep -q "$pw_ver"; then
+if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	echo "Same version detected, performing forced reinstallation of PassWall $pw_ver"
 	echo "发现相同版本，正在执行强制重新安装 PassWall $pw_ver"
-	opkg install luci-app-passwall_"$pw_ver"_all.ipk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.ipk depends/*.ipk haproxy --force-reinstall
+	apk add --allow-untrusted --force-reinstall luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
@@ -53,7 +53,7 @@ if opkg list-installed luci-app-passwall | grep -q "$pw_ver"; then
 else
 	echo "Installing PassWall $pw_ver"
 	echo "正在安装 PassWall $pw_ver"
-	opkg install luci-app-passwall_"$pw_ver"_all.ipk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.ipk depends/*.ipk haproxy
+	apk add --allow-untrusted luci-app-passwall_"$pw_ver"_all.apk luci-i18n-passwall-zh-cn_"$pwzh_ver"_all.apk depends/*.apk haproxy
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall installation failed"
 		echo "错误：PassWall 安装失败"
