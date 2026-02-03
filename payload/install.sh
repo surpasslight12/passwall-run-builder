@@ -80,9 +80,14 @@ set -- "$pw_pkg"
 if [ -n "$pwzh_pkg" ]; then
 	set -- "$@" "$pwzh_pkg"
 fi
-if ls depends/*.apk >/dev/null 2>&1; then
-	set -- "$@" depends/*.apk
-else
+deps_found=0
+for dep in depends/*.apk; do
+	if [ -e "$dep" ]; then
+		set -- "$@" "$dep"
+		deps_found=1
+	fi
+done
+if [ "$deps_found" -eq 0 ]; then
 	echo "WARNING: No dependency packages found under depends/"
 	echo "警告：depends/ 目录下未找到依赖包"
 fi
