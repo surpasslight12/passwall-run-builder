@@ -360,7 +360,7 @@ jobs:
               make "$PKG_PATH/compile" -j"$(nproc)" V=s 2>&1 || {
                 echo "[WARNING] Failed to compile $pkg (parallel), trying single thread"
                 make "$PKG_PATH/compile" V=s 2>&1 || {
-                  echo "[WARNING] Failed to compile $pkg, will use prebuilt if available"
+                  echo "[WARNING] Failed to compile $pkg, skipping"
                 }
               }
             else
@@ -384,208 +384,6 @@ jobs:
           
           echo "[SUCCESS] Dependency package compilation completed"
 
-      - name: Download prebuilt packages
-        run: |
-          set -e
-          echo "=========================================="
-          echo "Detecting target architecture"
-          echo "=========================================="
-          TARGET_ARCH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\1#p')
-          TARGET_SUBTARGET=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+\)/\([^/]\+\)/.*#\2#p')
-          
-          if [ "$TARGET_ARCH" = "x86" ] && [ "$TARGET_SUBTARGET" = "64" ]; then
-            ARCH_NAME="x86_64"
-          elif [ "$TARGET_ARCH" = "x86" ] && [ "$TARGET_SUBTARGET" = "generic" ]; then
-            ARCH_NAME="x86_64"
-          elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7621" ]; then
-            ARCH_NAME="mipsel_24kc"
-          elif [ "$TARGET_ARCH" = "ramips" ] && [ "$TARGET_SUBTARGET" = "mt7620" ]; then
-            ARCH_NAME="mipsel_24kc"
-          elif [ "$TARGET_ARCH" = "ath79" ] && [ "$TARGET_SUBTARGET" = "generic" ]; then
-            ARCH_NAME="mips_24kc"
-          elif [ "$TARGET_ARCH" = "bcm27xx" ] || [ "$TARGET_ARCH" = "bcm2708" ]; then
-            ARCH_NAME="arm_cortex-a7"
-          elif [ "$TARGET_ARCH" = "ipq40xx" ]; then
-            ARCH_NAME="arm_cortex-a7_neon-vfpv4"
-          else
-            echo "[WARNING] Unknown architecture ${TARGET_ARCH}/${TARGET_SUBTARGET}, using x86_64 as fallback"
-            ARCH_NAME="x86_64"
-          fi
-          
-          echo "SDK URL: $OPENWRT_SDK_URL"
-          echo "Target: ${TARGET_ARCH}/${TARGET_SUBTARGET}"
-          echo "Package architecture: $ARCH_NAME"
-          echo "ARCH_NAME=$ARCH_NAME" >> $GITHUB_ENV
-          
-          # Detect SDK version from URL (with patch version, e.g., 24.10.5)
-          # Also handle RC versions like 25.12.0-rc4
-          SDK_VERSION_FULL=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9]\+\.[0-9]\+\.[0-9]\+\(-rc[0-9]\+\)\?\).*#\1#p')
-          SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9]\+\.[0-9]\+\).*#\1#p')
-          if [ -z "$SDK_VERSION" ]; then
-            SDK_VERSION="24.10"
-          fi
-          if [ -z "$SDK_VERSION_FULL" ]; then
-            SDK_VERSION_FULL="$SDK_VERSION"
-          fi
-          echo "SDK Version: $SDK_VERSION (Full: $SDK_VERSION_FULL)"
-          
-          echo ""
-          echo "=========================================="
-          echo "Downloading PassWall dependency packages from SourceForge"
-          echo "=========================================="
-          
-          mkdir -p prebuilt-packages
-          cd prebuilt-packages
-          
-          PREBUILT_DOWNLOADED=false
-          WGET_RETRY_OPTS=(--timeout=60 --tries=3 -q)
-          
-          # PassWall dependency packages - download from SourceForge prebuilt repositories
-          # These are the dependency packages that PassWall needs (not the luci-app-passwall itself)
-          # Note: Go 1.25.6 and Rust toolchains are now installed system-wide from official sources,
-          # so most packages should compile successfully. However, some packages may still fail to compile
-          # due to other reasons (missing dependencies, etc.). Prebuilt packages are used as fallback.
-          # Note: shadowsocks-libev and shadowsocksr-libev variants are compiled from SDK, not downloaded
-          # Note: OpenWrt official releases (downloads.openwrt.org) do not contain PassWall-specific packages,
-          # so we skip that source and go directly to SourceForge which hosts the prebuilt PassWall packages.
-          PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
-            shadow-tls shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
-            simple-obfs sing-box tcping trojan-plus tuic-client \
-            v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
-          
-          echo ""
-          echo "=========================================="
-          echo "Downloading PassWall dependencies from SourceForge (primary source)"
-          echo "=========================================="
-          
-          # All PassWall dependency packages from SourceForge
-          MISSING_DEPS="$PASSWALL_DEPS"
-          
-          # SourceForge base URLs for openwrt-passwall-build
-          # Use both SourceForge web URLs and direct download URLs to improve reliability
-          SOURCEFORGE_MIRROR_BASES=("https://sourceforge.net/projects/openwrt-passwall-build/files/releases" "https://downloads.sourceforge.net/project/openwrt-passwall-build/releases")
-          SOURCEFORGE_MIRROR_SUFFIXES=("/download" "")
-          # NOTE: SOURCEFORGE_MIRROR_BASES and SOURCEFORGE_MIRROR_SUFFIXES indices must stay aligned.
-          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -eq 0 ] || [ "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" -eq 0 ]; then
-            echo "[ERROR] SourceForge mirror arrays are empty" >&2
-            exit 1
-          fi
-          if [ "${#SOURCEFORGE_MIRROR_BASES[@]}" -ne "${#SOURCEFORGE_MIRROR_SUFFIXES[@]}" ]; then
-            echo "[ERROR] SourceForge mirror arrays are misaligned" >&2
-            exit 1
-          fi
-          
-          # Version paths to try (in order of preference)
-          # For new SDK versions, try SDK_VERSION_FULL (rc), then SDK_VERSION, then snapshots as fallback
-          VERSION_PATHS="packages-${SDK_VERSION} snapshots/packages"
-          if [ -n "$SDK_VERSION_FULL" ] && [ "$SDK_VERSION_FULL" != "$SDK_VERSION" ]; then
-            VERSION_PATHS="packages-${SDK_VERSION_FULL} $VERSION_PATHS"
-          fi
-          
-          # Try SourceForge passwall-build repository for missing dependency packages
-          if [ -n "$MISSING_DEPS" ]; then
-            ALL_DOWNLOADED=false
-            for VERSION_PATH in $VERSION_PATHS; do
-              echo ""
-              echo "Trying version path: ${VERSION_PATH}"
-              
-              for idx in "${!SOURCEFORGE_MIRROR_BASES[@]}"; do
-                SF_BASE_URL="${SOURCEFORGE_MIRROR_BASES[$idx]}"
-                SF_SUFFIX="${SOURCEFORGE_MIRROR_SUFFIXES[$idx]}"
-                SOURCEFORGE_INDEX="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/Packages${SF_SUFFIX}"
-                
-                echo "Trying SourceForge package index: $SOURCEFORGE_INDEX"
-                if wget "${WGET_RETRY_OPTS[@]}" -O "Packages.tmp" "$SOURCEFORGE_INDEX" 2>/dev/null; then
-                  # Check if the downloaded file is an actual Packages index (not HTML error page)
-                  if [ -s "Packages.tmp" ] && grep -q "^Package:" "Packages.tmp" 2>/dev/null; then
-                    mv "Packages.tmp" "Packages"
-                    echo "[SUCCESS] Downloaded package index from SourceForge ($VERSION_PATH)"
-                    echo "[INFO] Packages index contains $(grep -c '^Package:' Packages) packages"
-                    
-                    for pkg in $MISSING_DEPS; do
-                      # Skip if already downloaded
-                      if ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
-                        continue
-                      fi
-                      # Extract filename from Packages index
-                      PKG_FILE=$(grep -A 10 "^Package: ${pkg}$" Packages | grep "^Filename:" | head -1 | awk '{print $2}')
-                      if [ -n "$PKG_FILE" ]; then
-                        PKG_URL="${SF_BASE_URL}/${VERSION_PATH}/${ARCH_NAME}/passwall_packages/${PKG_FILE}${SF_SUFFIX}"
-                        echo "Downloading missing dependency from SourceForge: $pkg"
-                        PKG_BASENAME=$(basename "$PKG_FILE")
-                        if wget "${WGET_RETRY_OPTS[@]}" -O "$PKG_BASENAME" "$PKG_URL" 2>/dev/null && [ -s "$PKG_BASENAME" ]; then
-                          echo "  [SUCCESS] Downloaded $pkg"
-                          PREBUILT_DOWNLOADED=true
-                        else
-                          echo "  [SKIPPED] Could not download $pkg"
-                        fi
-                      else
-                        echo "  [INFO] Package $pkg not found in index"
-                      fi
-                    done
-                    
-                    # Check if we still have missing packages
-                    STILL_MISSING=""
-                    for pkg in $MISSING_DEPS; do
-                      if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
-                        STILL_MISSING="$STILL_MISSING $pkg"
-                      fi
-                    done
-                    
-                    # If we got all packages, stop trying version paths
-                    if [ -z "$STILL_MISSING" ]; then
-                      echo "[SUCCESS] All packages downloaded successfully"
-                      # break out of mirror loop; outer loop will check ALL_DOWNLOADED afterward
-                      ALL_DOWNLOADED=true
-                      break
-                    fi
-                    break
-                  else
-                    echo "[INFO] Response is not a valid Packages index"
-                    rm -f "Packages.tmp"
-                  fi
-                else
-                  echo "[INFO] Could not reach SourceForge"
-                fi
-              done
-              if [ "$ALL_DOWNLOADED" = "true" ]; then
-                break
-              fi
-            done
-          fi
-          
-          # Final report on missing PassWall dependency packages
-          FINAL_MISSING=""
-          for pkg in $PASSWALL_DEPS; do
-            if ! ls "${pkg}_"*.apk "${pkg}-"*.apk >/dev/null 2>&1; then
-              FINAL_MISSING="$FINAL_MISSING $pkg"
-            fi
-          done
-          
-          if [ -n "$FINAL_MISSING" ]; then
-            echo ""
-            echo "[INFO] Missing dependency packages:$FINAL_MISSING"
-            echo "[INFO] These packages may not be available in the prebuilt repository"
-          fi
-          
-          # Count downloaded packages
-          PKG_COUNT=$(find . -name "*.apk" 2>/dev/null | wc -l)
-          echo ""
-          echo "Prebuilt packages downloaded: $PKG_COUNT"
-          
-          if [ "$PKG_COUNT" -gt 0 ]; then
-            echo "Downloaded packages:"
-            ls -la *.apk 2>/dev/null || true
-          fi
-          
-          if [ "$PKG_COUNT" -eq 0 ]; then
-            echo "[WARNING] No prebuilt packages could be downloaded"
-            echo "[INFO] Some packages may fail to compile due to CI environment limitations"
-            echo "[INFO] These packages will be missing from the final installer"
-          fi
-          
-          echo "PREBUILT_DOWNLOADED=$PREBUILT_DOWNLOADED" >> $GITHUB_ENV
-
       - name: Prepare version parser
         run: |
           cat > "$GITHUB_WORKSPACE/extract-version.sh" <<'SH'
@@ -599,11 +397,9 @@ jobs:
               base="${base#-}"
               base="${base#_}"
             fi
-            if [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "_${ARCH_NAME}$"; then
-              base="${base%_${ARCH_NAME}}"
-            elif [ -n "${ARCH_NAME:-}" ] && printf "%s" "$base" | grep -q -- "-${ARCH_NAME}$"; then
-              base="${base%-${ARCH_NAME}}"
-            elif printf "%s" "$base" | grep -q -- '_all$'; then
+            # SDK-built APKs in this workflow do not include explicit arch suffixes.
+            # Keep trimming for _all/-all and the final underscore segment to normalize versions.
+            if printf "%s" "$base" | grep -q -- '_all$'; then
               base="${base%_all}"
             elif printf "%s" "$base" | grep -q -- '-all$'; then
               base="${base%-all}"
@@ -614,7 +410,7 @@ jobs:
           }
           SH
 
-      - name: Collect and merge packages
+      - name: Collect compiled packages
         working-directory: openwrt-sdk
         # Use bash for compgen glob checks in this step.
         shell: bash
@@ -625,12 +421,7 @@ jobs:
           echo "=========================================="
           
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
-          mkdir -p "$GITHUB_WORKSPACE/built-packages" "$GITHUB_WORKSPACE/prebuilt-staging"
-          
-          if [ "$PREBUILT_DOWNLOADED" = "true" ]; then
-            cp "$GITHUB_WORKSPACE/prebuilt-packages/"*.apk "$GITHUB_WORKSPACE/prebuilt-staging/" 2>/dev/null || true
-            echo "Prebuilt packages available: $(ls -1 "$GITHUB_WORKSPACE/prebuilt-staging/" | wc -l)"
-          fi
+          mkdir -p "$GITHUB_WORKSPACE/built-packages"
           
           find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           find bin/packages \( -name "luci-i18n-passwall-zh-cn-*.apk" -o -name "luci-i18n-passwall-zh-cn_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || echo "[INFO] Chinese i18n package not found (non-critical)"
@@ -638,10 +429,7 @@ jobs:
           echo "Main packages collected:"
           ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || echo "  No main packages found"
           
-          # PassWall dependency packages (downloaded from SourceForge)
-          # Note: PASSWALL_DEPS (prebuilt download list) contains packages that may need prebuilt binaries
-          # DEPENDENCY_PATTERNS includes additional shadowsocks-libev and shadowsocksr-libev variants
-          # that are compiled from SDK source, not downloaded as prebuilt packages
+          # PassWall dependency packages compiled from SDK source (search patterns used below).
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
@@ -662,27 +450,16 @@ jobs:
           
           echo "Built packages found: $(find "$GITHUB_WORKSPACE/built-packages/" -name "*.apk" 2>/dev/null | wc -l)"
           
-          compare_versions() {
-            local ver1="$1"
-            local ver2="$2"
-            local highest=$(printf '%s\n%s\n' "$ver1" "$ver2" | sort -V | tail -n1)
-            [ "$ver1" = "$highest" ]
-          }
-          
           echo ""
           echo "=========================================="
-          echo "Comparing built vs prebuilt packages"
+          echo "Selecting compiled packages"
           echo "=========================================="
-          printf "%-35s %-15s %-15s %-10s\n" "Package" "Built Ver" "Prebuilt Ver" "Selected"
-          printf "%-35s %-15s %-15s %-10s\n" "-----------------------------------" "---------------" "---------------" "----------"
+          printf "%-35s %-15s\n" "Package" "Version"
+          printf "%-35s %-15s\n" "-----------------------------------" "---------------"
           
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
             BUILT_PKG=""
-            PREBUILT_PKG=""
             BUILT_VER=""
-            PREBUILT_VER=""
-            SELECTED=""
-            SOURCE=""
             
             for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}-"*.apk; do
               if [ -e "$f" ]; then
@@ -692,38 +469,11 @@ jobs:
               fi
             done
             
-            for f in "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/prebuilt-staging/${pkg_prefix}-"*.apk; do
-              if [ -e "$f" ]; then
-                PREBUILT_PKG="$f"
-                PREBUILT_VER=$(extract_version "$f" "$pkg_prefix")
-                break
-              fi
-            done
-            
-            if [ -n "$BUILT_PKG" ] && [ -n "$PREBUILT_PKG" ]; then
-              if compare_versions "$BUILT_VER" "$PREBUILT_VER"; then
-                SELECTED="$BUILT_PKG"
-                SOURCE="BUILT"
-              else
-                SELECTED="$PREBUILT_PKG"
-                SOURCE="PREBUILT"
-              fi
-              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "$BUILT_VER" "$PREBUILT_VER" "$SOURCE"
-            elif [ -n "$BUILT_PKG" ]; then
-              SELECTED="$BUILT_PKG"
-              SOURCE="BUILT"
-              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "$BUILT_VER" "(none)" "$SOURCE"
-            elif [ -n "$PREBUILT_PKG" ]; then
-              SELECTED="$PREBUILT_PKG"
-              SOURCE="PREBUILT"
-              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "(none)" "$PREBUILT_VER" "$SOURCE"
+            if [ -n "$BUILT_PKG" ]; then
+              printf "%-35s %-15s\n" "$pkg_prefix" "$BUILT_VER"
+              cp "$BUILT_PKG" "$GITHUB_WORKSPACE/payload/depends/"
             else
-              printf "%-35s %-15s %-15s %-10s\n" "$pkg_prefix" "(none)" "(none)" "MISSING"
-              continue
-            fi
-            
-            if [ -n "$SELECTED" ]; then
-              cp "$SELECTED" "$GITHUB_WORKSPACE/payload/depends/"
+              printf "%-35s %-15s\n" "$pkg_prefix" "(none)"
             fi
           done
           
@@ -744,8 +494,7 @@ jobs:
               echo "  - $pkg"
             done
             echo ""
-            echo "[INFO] These packages may have failed to compile or were not available as prebuilt."
-            echo "[INFO] Consider downloading prebuilt packages from SourceForge."
+            echo "[INFO] These packages may have failed to compile in the SDK build."
           else
             echo "[SUCCESS] All dependency packages collected successfully!"
           fi
@@ -761,9 +510,7 @@ jobs:
           
           if [ "$DEP_COUNT" -eq 0 ]; then
             echo "[ERROR] No dependency APK files found in payload/depends" >&2
-            echo "[INFO] Neither compilation nor prebuilt downloads succeeded" >&2
-            echo "[INFO] This likely means SourceForge prebuilt packages don't exist for SDK version ${SDK_VERSION:-unknown}" >&2
-            echo "[INFO] Please check if packages are available at: https://sourceforge.net/projects/openwrt-passwall-build/files/releases/" >&2
+            echo "[INFO] Dependency compilation did not produce any packages" >&2
             exit 1
           fi
           
@@ -771,13 +518,12 @@ jobs:
           # DEPENDENCY_PATTERNS lists 26 PassWall dependency package patterns.
           # Go 1.25.6 and Rust are now installed system-wide from official sources.
           # Most packages should compile successfully with proper toolchains.
-          # Dependency packages are downloaded from SourceForge for compilation failures.
-          # Minimum expected: 10 packages (some may fail to compile or download)
-          # With all packages compiled or downloaded: up to 26 packages
+          # Minimum expected: 10 packages (some may fail to compile)
+          # With all packages compiled: up to 26 packages
           MIN_EXPECTED_PACKAGES=10
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
             echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-26)"
-            echo "[INFO] Some packages may have failed to compile or download"
+            echo "[INFO] Some packages may have failed to compile"
           fi
           
           echo ""

@@ -8,7 +8,7 @@ This project is based on the upstream [Openwrt-Passwall/openwrt-passwall](https:
 
 - ✅ 自动从 OpenWrt SDK 编译 luci-app-passwall
 - ✅ 使用最新版本的 Go 和 Rust 工具链确保编译成功
-- ✅ 自动下载无法编译的依赖包
+- ✅ 自动编译依赖包
 - ✅ 生成一键安装的 `.run` 安装包
 - ✅ 支持自定义 OpenWrt SDK 版本和架构
 - ✅ 支持 OpenWrt 25.12 的 APK 包管理器（替代 OPKG）
@@ -158,7 +158,6 @@ apk search <keyword>
 ### 依赖包获取方式
 
 1. **优先编译**: 使用 OpenWrt SDK + 最新 Go/Rust 工具链从源码编译
-2. **预编译包**: 编译失败的包自动从 SourceForge 的 openwrt-passwall-build 仓库下载
 
 ## 项目结构 | Project Structure
 
@@ -212,7 +211,7 @@ A: 这些是正常警告，不会影响编译结果。OpenWrt 的配置系统在
 
 ### Q: 某些包编译失败
 
-A: 工作流会自动从 SourceForge 下载预编译包作为补充。最终的 `.run` 安装包仍会包含所有必要的依赖。
+A: 请检查 SDK 构建日志中是否有包编译失败的提示，未能编译的包不会被打包进最终的 `.run` 安装包。
 
 ### Q: 如何更换 SDK 版本或架构？
 
