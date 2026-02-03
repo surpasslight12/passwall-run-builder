@@ -81,11 +81,18 @@ if [ -n "$pwzh_pkg" ]; then
 else
 	set -- "$pw_pkg"
 fi
-if [ -d depends ] && ls depends/*.apk >/dev/null 2>&1; then
+if [ -d depends ]; then
 	for dep in depends/*.apk; do
-		set -- "$@" "$dep"
+		if [ -e "$dep" ]; then
+			set -- "$@" "$dep"
+			deps_added=1
+		fi
 	done
 else
+	echo "WARNING: No dependency packages found under depends/"
+	echo "警告：depends/ 目录下未找到依赖包"
+fi
+if [ -z "${deps_added:-}" ]; then
 	echo "WARNING: No dependency packages found under depends/"
 	echo "警告：depends/ 目录下未找到依赖包"
 fi
@@ -102,8 +109,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 			apk del "$pkg"
 		fi
 	done
-	apk add --allow-untrusted "$@"
-	if [ $? -ne 0 ]; then
+	if ! apk add --allow-untrusted "$@"; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
 		exit 1
@@ -111,8 +117,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 else
 	echo "Installing PassWall $pw_ver"
 	echo "正在安装 PassWall $pw_ver"
-	apk add --allow-untrusted "$@"
-	if [ $? -ne 0 ]; then
+	if ! apk add --allow-untrusted "$@"; then
 		echo "ERROR: PassWall installation failed"
 		echo "错误：PassWall 安装失败"
 		exit 1
