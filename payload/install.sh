@@ -76,11 +76,12 @@ if [ -z "$pwzh_pkg" ]; then
 	echo "INFO: luci-i18n-passwall-zh-cn package not found, continuing without it"
 	echo "提示：未找到 luci-i18n-passwall-zh-cn 软件包，将跳过安装"
 fi
-set -- "$pw_pkg"
 if [ -n "$pwzh_pkg" ]; then
-	set -- "$@" "$pwzh_pkg"
+	set -- "$pw_pkg" "$pwzh_pkg"
+else
+	set -- "$pw_pkg"
 fi
-if ls depends/*.apk >/dev/null 2>&1; then
+if [ -d depends ] && ls depends/*.apk >/dev/null 2>&1; then
 	for dep in depends/*.apk; do
 		set -- "$@" "$dep"
 	done

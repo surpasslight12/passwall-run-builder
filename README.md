@@ -71,6 +71,8 @@ chmod +x PassWall_*.run
 
 从 OpenWrt 25.12 开始系统改用 APK 包管理器，本项目已适配 `.apk` 格式与 `apk add` 安装方式。旧版 OpenWrt (24.10 及更早) 请使用旧版本或自行修改脚本。
 
+常用命令：`apk update`（更新软件源）、`apk add <pkg>`（安装包）、`apk del <pkg>`（卸载包）。
+
 ### 参考资源 | Resources
 
 - [OpenWrt APK 官方文档 | Official APK Documentation](https://openwrt.org/docs/guide-user/additional-software/apk)
