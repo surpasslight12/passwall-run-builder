@@ -81,18 +81,16 @@ if [ -n "$pwzh_pkg" ]; then
 else
 	set -- "$pw_pkg"
 fi
+deps_added=0
 if [ -d depends ]; then
 	for dep in depends/*.apk; do
 		if [ -e "$dep" ]; then
 			set -- "$@" "$dep"
-			deps_added=1
+			deps_added=$((deps_added + 1))
 		fi
 	done
-else
-	echo "WARNING: No dependency packages found under depends/"
-	echo "警告：depends/ 目录下未找到依赖包"
 fi
-if [ -z "${deps_added:-}" ]; then
+if [ "$deps_added" -eq 0 ]; then
 	echo "WARNING: No dependency packages found under depends/"
 	echo "警告：depends/ 目录下未找到依赖包"
 fi
