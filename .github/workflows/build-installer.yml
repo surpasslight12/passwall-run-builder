@@ -311,16 +311,6 @@ jobs:
           yes '' | make defconfig
           echo "[SUCCESS] Build configured"
 
-      - name: Compile host tools
-        working-directory: openwrt-sdk
-        run: |
-          set -e
-          echo "=========================================="
-          echo "Compiling luci-base host tools"
-          echo "=========================================="
-          make package/feeds/luci/luci-base/host/compile V=s
-          echo "[SUCCESS] Host tools compiled"
-
       - name: Compile luci-app-passwall
         working-directory: openwrt-sdk
         run: |
