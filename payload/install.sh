@@ -42,9 +42,9 @@ if [ -z "$pw_pkg" ] || [ -z "$pw_ver" ]; then
 	exit 1
 fi
 
-if [ -z "$pwzh_pkg" ] || [ -z "$pwzh_ver" ]; then
-	echo "ERROR: Failed to detect luci-i18n-passwall-zh-cn version"
-	echo "错误：无法检测到 luci-i18n-passwall-zh-cn 版本"
+if [ -n "$pwzh_pkg" ] && [ -z "$pwzh_ver" ]; then
+	echo "ERROR: Failed to parse luci-i18n-passwall-zh-cn version from package filename"
+	echo "错误：无法从安装包文件名解析 luci-i18n-passwall-zh-cn 版本"
 	exit 1
 fi
 
@@ -52,8 +52,7 @@ echo "Detected PassWall version: $pw_ver"
 echo "检测到 PassWall 版本：$pw_ver"
 
 # Update package lists
-apk update
-if [ $? -ne 0 ]; then
+if ! apk update; then
 	echo "ERROR: Failed to update package lists. Please check network connection and repository configuration."
 	echo "错误：更新软件源列表失败，请检查路由器网络连接以及软件源配置。"
 	exit 1
@@ -73,6 +72,27 @@ fi
 # Install PassWall packages
 # Note: For local .apk files with --allow-untrusted, APK requires explicit removal before reinstallation
 # We remove existing packages first, then add the new ones. This is the proper method for local packages.
+if [ -n "$pwzh_pkg" ]; then
+	set -- "$pw_pkg" "$pwzh_pkg"
+else
+	echo "INFO: luci-i18n-passwall-zh-cn package not found, continuing without it"
+	echo "提示：未找到 luci-i18n-passwall-zh-cn 软件包，将跳过安装"
+	set -- "$pw_pkg"
+fi
+deps_added=0
+if [ -d depends ]; then
+	for dep in depends/*.apk; do
+		if [ -e "$dep" ]; then
+			set -- "$@" "$dep"
+			deps_added=$((deps_added + 1))
+		fi
+	done
+fi
+if [ "$deps_added" -eq 0 ]; then
+	echo "WARNING: No dependency packages found under depends/"
+	echo "警告：depends/ 目录下未找到依赖包"
+fi
+set -- "$@" haproxy
 if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	echo "Same version detected, performing forced reinstallation of PassWall $pw_ver"
 	echo "发现相同版本，正在执行强制重新安装 PassWall $pw_ver"
@@ -85,8 +105,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 			apk del "$pkg"
 		fi
 	done
-	apk add --allow-untrusted "$pw_pkg" "$pwzh_pkg" depends/*.apk haproxy
-	if [ $? -ne 0 ]; then
+	if ! apk add --allow-untrusted "$@"; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
 		exit 1
@@ -94,8 +113,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 else
 	echo "Installing PassWall $pw_ver"
 	echo "正在安装 PassWall $pw_ver"
-	apk add --allow-untrusted "$pw_pkg" "$pwzh_pkg" depends/*.apk haproxy
-	if [ $? -ne 0 ]; then
+	if ! apk add --allow-untrusted "$@"; then
 		echo "ERROR: PassWall installation failed"
 		echo "错误：PassWall 安装失败"
 		exit 1

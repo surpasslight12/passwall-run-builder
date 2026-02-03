@@ -6,12 +6,11 @@ This project is based on the upstream [Openwrt-Passwall/openwrt-passwall](https:
 
 ## 主要特性 | Key Features
 
-- ✅ 自动从 OpenWrt SDK 编译 luci-app-passwall
-- ✅ 使用最新版本的 Go 和 Rust 工具链确保编译成功
-- ✅ 自动编译依赖包
+- ✅ 自动从 OpenWrt SDK 编译 luci-app-passwall 与依赖包
+- ✅ 使用最新 Go / Rust 工具链确保编译成功
 - ✅ 生成一键安装的 `.run` 安装包
-- ✅ 支持自定义 OpenWrt SDK 版本和架构
-- ✅ 支持 OpenWrt 25.12 的 APK 包管理器（替代 OPKG）
+- ✅ 支持自定义 OpenWrt SDK 版本与架构
+- ✅ 适配 OpenWrt 25.12 的 APK 包管理器
 
 ## 快速开始 | Quick Start
 
@@ -70,49 +69,9 @@ chmod +x PassWall_*.run
 
 ## OpenWrt 25.12 APK 包管理器 | APK Package Manager
 
-**重要说明 | Important Note:**
+从 OpenWrt 25.12 开始系统改用 APK 包管理器，本项目已适配 `.apk` 格式与 `apk add` 安装方式。旧版 OpenWrt (24.10 及更早) 请使用旧版本或自行修改脚本。
 
-从 OpenWrt 25.12 开始，系统使用 Alpine Linux 的 APK 包管理器替代了传统的 OPKG。本项目已完全适配 APK 包管理器。
-
-Starting from OpenWrt 25.12, the system uses Alpine Linux's APK package manager instead of the traditional OPKG. This project is fully adapted for the APK package manager.
-
-### 主要变化 | Key Changes
-
-- **包格式**: 从 `.ipk` 变更为 `.apk` 格式
-- **Package format**: Changed from `.ipk` to `.apk` format
-- **安装命令**: 使用 `apk add` 替代 `opkg install`
-- **Installation command**: Use `apk add` instead of `opkg install`
-
-### APK 常用命令 | Common APK Commands
-
-```bash
-# 更新软件源 | Update repository database
-apk update
-
-# 安装软件包 | Install packages
-apk add <package-name>
-
-# 安装本地软件包（如本项目的 .run 安装包）| Install local packages
-apk add --allow-untrusted /path/to/package.apk
-
-# 删除软件包 | Remove packages
-apk del <package-name>
-
-# 列出已安装软件包 | List installed packages
-apk list -I
-
-# 搜索软件包 | Search for packages
-apk search <keyword>
-```
-
-### 兼容性说明 | Compatibility Notes
-
-- 本安装脚本专为 OpenWrt 25.12+ 设计，使用 APK 包管理器
-- The installation script is designed for OpenWrt 25.12+ and uses the APK package manager
-- 对于 OpenWrt 25.12+，所有包都以 `.apk` 格式构建和安装
-- For OpenWrt 25.12+, all packages are built and installed in `.apk` format
-- 对于 OpenWrt 24.10 及更早版本，请使用项目的旧版本
-- For OpenWrt 24.10 and earlier versions, please use older project versions
+常用命令：`apk update`（更新软件源）、`apk add <pkg>`（安装包）、`apk del <pkg>`（卸载包）。
 
 ### 参考资源 | Resources
 
@@ -136,28 +95,7 @@ apk search <keyword>
 
 ## 依赖包 | Dependencies
 
-本项目的安装包包含以下 PassWall 依赖 (20+ 个包)：
-
-**核心代理工具:**
-- xray-core, sing-box
-- v2ray-plugin, xray-plugin
-
-**传输协议:**
-- shadowsocks-libev (ss-local, ss-redir, ss-server)
-- shadowsocks-rust (sslocal, ssserver)
-- shadowsocksr-libev (ssr-local, ssr-redir, ssr-server)
-- trojan-plus, hysteria, naiveproxy, tuic-client
-
-**辅助工具:**
-- chinadns-ng, dns2socks, ipt2socks, microsocks
-- simple-obfs-client, tcping, shadow-tls
-
-**地理数据:**
-- v2ray-geoip, v2ray-geosite, geoview
-
-### 依赖包获取方式
-
-1. **优先编译**: 使用 OpenWrt SDK + 最新 Go/Rust 工具链从源码编译
+安装包包含 PassWall 依赖（如 xray-core、sing-box、shadowsocks 系列、trojan-plus、v2ray-geosite 等），均通过 OpenWrt SDK 搭配最新 Go/Rust 工具链编译。
 
 ## 项目结构 | Project Structure
 
@@ -176,32 +114,13 @@ passwall-run-builder/
 
 ## 自定义安装内容 | Customization
 
-### 修改安装脚本
-
-编辑 `payload/install.sh` 来自定义安装逻辑。当前脚本会：
-1. 检测 PassWall 版本
-2. 运行 `apk update`（OpenWrt 25.12+）
-3. 强制重装/安装所有 APK 包
-4. 清理旧依赖
-
-### 添加额外文件
-
-将需要安装的额外文件放入 `payload/` 目录，并在 `install.sh` 中添加处理逻辑。
+编辑 `payload/install.sh` 可调整安装逻辑（版本检测、`apk update`、重装/安装 APK 依赖）。额外文件可放入 `payload/` 并在脚本中处理。
 
 ## 系统要求 | Requirements
 
-### OpenWrt 设备
-
-- **架构**: 与 SDK 版本匹配 (如 x86_64, arm_cortex-a9, mipsel_24kc 等)
-- **固件版本**: OpenWrt 25.12+ (使用 APK 包管理器)
-- **存储空间**: 至少 50MB 可用空间
-- **内存**: 建议至少 128MB RAM
-
-### GitHub Actions (CI)
-
-- Ubuntu latest runner
-- 约 2GB 磁盘空间用于 SDK 和编译产物
-- 构建时间: 通常 20-40 分钟
+- OpenWrt 25.12+（APK 包管理器）
+- 设备架构需与 SDK 匹配 (如 x86_64, arm_cortex-a9, mipsel_24kc 等)
+- 至少 50MB 可用空间，建议 128MB RAM
 
 ## 常见问题 | FAQ
 
