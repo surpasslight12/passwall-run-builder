@@ -72,13 +72,11 @@ fi
 # Install PassWall packages
 # Note: For local .apk files with --allow-untrusted, APK requires explicit removal before reinstallation
 # We remove existing packages first, then add the new ones. This is the proper method for local packages.
-if [ -z "$pwzh_pkg" ]; then
-	echo "INFO: luci-i18n-passwall-zh-cn package not found, continuing without it"
-	echo "提示：未找到 luci-i18n-passwall-zh-cn 软件包，将跳过安装"
-fi
 if [ -n "$pwzh_pkg" ]; then
 	set -- "$pw_pkg" "$pwzh_pkg"
 else
+	echo "INFO: luci-i18n-passwall-zh-cn package not found, continuing without it"
+	echo "提示：未找到 luci-i18n-passwall-zh-cn 软件包，将跳过安装"
 	set -- "$pw_pkg"
 fi
 deps_added=0
