@@ -14,7 +14,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 
 1. **克隆仓库**
    ```bash
-   git clone https://github.com/<your-username>/passwall-run-builder.git  # 替换为你的 GitHub 用户名
+   git clone https://github.com/YOUR_USERNAME/passwall-run-builder.git  # 替换为你的 GitHub 用户名
    cd passwall-run-builder
    ```
 2. **配置 SDK** (`config/openwrt-sdk.conf`)
@@ -39,7 +39,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 
 - 自动安装最新 Go/Rust，用于编译 Go/Rust 依赖包。
 - 仅编译 `luci-app-passwall` 与 PassWall 依赖包，跳过 luci-base host tools 以减少构建耗时。
-- 如遇构建问题，可在 `.github/workflows/build-installer.yml` 的编译阶段手动补回 `make package/feeds/luci/luci-base/host/compile` 步骤。
+- 如遇构建问题，可在 `.github/workflows/build-installer.yml` 的编译阶段、`Compile luci-app-passwall` 之前手动补回 `make package/feeds/luci/luci-base/host/compile` 步骤。
 - `luci-i18n-passwall-zh-cn` 为可选包，若编译失败不会影响主包打包。
 - 依赖包编译失败会被跳过，仅打包成功产物。
 
