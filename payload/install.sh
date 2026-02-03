@@ -76,17 +76,17 @@ if [ -z "$pwzh_pkg" ]; then
 	echo "INFO: luci-i18n-passwall-zh-cn package not found, continuing without it"
 	echo "提示：未找到 luci-i18n-passwall-zh-cn 软件包，将跳过安装"
 fi
-install_pkgs=("$pw_pkg")
+install_pkgs="$pw_pkg"
 if [ -n "$pwzh_pkg" ]; then
-	install_pkgs+=("$pwzh_pkg")
+	install_pkgs="$install_pkgs $pwzh_pkg"
 fi
-if compgen -G "depends/*.apk" > /dev/null; then
-	install_pkgs+=(depends/*.apk)
+if ls depends/*.apk >/dev/null 2>&1; then
+	install_pkgs="$install_pkgs depends/"*.apk
 else
 	echo "WARNING: No dependency packages found under depends/"
 	echo "警告：depends/ 目录下未找到依赖包"
 fi
-install_pkgs+=(haproxy)
+install_pkgs="$install_pkgs haproxy"
 if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	echo "Same version detected, performing forced reinstallation of PassWall $pw_ver"
 	echo "发现相同版本，正在执行强制重新安装 PassWall $pw_ver"
@@ -99,7 +99,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 			apk del "$pkg"
 		fi
 	done
-	apk add --allow-untrusted "${install_pkgs[@]}"
+	apk add --allow-untrusted $install_pkgs
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall reinstallation failed"
 		echo "错误：PassWall 重新安装失败"
@@ -108,7 +108,7 @@ if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 else
 	echo "Installing PassWall $pw_ver"
 	echo "正在安装 PassWall $pw_ver"
-	apk add --allow-untrusted "${install_pkgs[@]}"
+	apk add --allow-untrusted $install_pkgs
 	if [ $? -ne 0 ]; then
 		echo "ERROR: PassWall installation failed"
 		echo "错误：PassWall 安装失败"
