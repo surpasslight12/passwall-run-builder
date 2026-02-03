@@ -38,7 +38,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 ## 编译说明 | Build Notes
 
 - 自动安装最新 Go/Rust，用于编译 Go/Rust 依赖包。
-- 仅编译 `luci-app-passwall` 与 PassWall 依赖包，跳过 luci-base host tools 以减少构建耗时（如遇构建问题，可在 workflow 中手动补回该步骤）。
+- 仅编译 `luci-app-passwall` 与 PassWall 依赖包，跳过 luci-base host tools 以减少构建耗时（如遇构建问题，可在 `build-installer.yml` 的编译阶段手动补回 luci-base host tools 相关步骤）。
 - `luci-i18n-passwall-zh-cn` 为可选包，若编译失败不会影响主包打包。
 - 依赖包编译失败会被跳过，仅打包成功产物。
 
