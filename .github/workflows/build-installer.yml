@@ -397,6 +397,8 @@ jobs:
               base="${base#-}"
               base="${base#_}"
             fi
+            # SDK-built APKs in this workflow do not include explicit arch suffixes.
+            # Keep trimming for _all/-all and the final underscore segment to normalize versions.
             if printf "%s" "$base" | grep -q -- '_all$'; then
               base="${base%_all}"
             elif printf "%s" "$base" | grep -q -- '-all$'; then
@@ -427,7 +429,7 @@ jobs:
           echo "Main packages collected:"
           ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || echo "  No main packages found"
           
-          # PassWall dependency packages compiled from SDK source
+          # PassWall dependency packages compiled from SDK source (search patterns used below).
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
