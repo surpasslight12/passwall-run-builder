@@ -43,8 +43,8 @@ if [ -z "$pw_pkg" ] || [ -z "$pw_ver" ]; then
 fi
 
 if [ -n "$pwzh_pkg" ] && [ -z "$pwzh_ver" ]; then
-	echo "ERROR: Failed to detect luci-i18n-passwall-zh-cn version"
-	echo "错误：无法检测到 luci-i18n-passwall-zh-cn 版本"
+	echo "ERROR: Failed to parse luci-i18n-passwall-zh-cn version from package filename"
+	echo "错误：无法从安装包文件名解析 luci-i18n-passwall-zh-cn 版本"
 	exit 1
 fi
 
