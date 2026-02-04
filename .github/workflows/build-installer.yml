@@ -237,21 +237,15 @@ jobs:
           echo "=========================================="
           echo "Installing build dependencies"
           echo "=========================================="
+          # Refresh feeds index after PassWall sources were added
           ./scripts/feeds update -i
           
           echo "Verifying system toolchain versions..."
-          echo "System Go version (will be used for compilation):"
+          echo "System Go version:"
           go version || echo "[WARNING] Go not found in PATH"
-          echo "System Rust version (will be used for compilation):"
+          echo "System Rust version:"
           rustc --version || echo "[WARNING] Rust not found in PATH"
           cargo --version || echo "[WARNING] Cargo not found in PATH"
-          
-          echo ""
-          echo "NOTE: Go 1.25.6 and Rust were installed system-wide in previous steps"
-          echo "NOTE: We do NOT install golang or rust packages from feeds because:"
-          echo "  1. Feeds golang (1.23.12) is too old for xray-core (requires >= 1.25.6)"
-          echo "  2. Building Rust compiler from feeds takes too long and often fails in CI"
-          echo "  3. OpenWrt SDK will automatically use system Go and Rust from PATH"
           echo ""
           
           echo "Installing runtime dependencies..."
@@ -506,7 +500,7 @@ jobs:
           
           # Package count explanation:
           # DEPENDENCY_PATTERNS lists 26 PassWall dependency package patterns.
-          # Go 1.25.6 and Rust are now installed system-wide from official sources.
+          # Go and Rust are installed system-wide from official sources.
           # Most packages should compile successfully with proper toolchains.
           # Minimum expected: 10 packages (some may fail to compile)
           # With all packages compiled: up to 26 packages
