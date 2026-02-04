@@ -62,8 +62,7 @@ fi
 if apk list -I libsodium | grep -Eq "\d.\d.\d{2}-\d" || apk list -I boost | grep -Eq "\d.\d{2}.\d-\d"; then
 	echo "Detected legacy dependency versions from firmware upgrade, updating dependencies..."
 	echo "检测到旧版本固件升级保留的依赖版本问题，正在更新相关依赖..."
-	apk add libev libsodium libudns boost boost-system boost-program_options libltdl7 liblua5.3-5.3 libcares coreutils-base64 coreutils-nohup
-	if [ $? -ne 0 ]; then
+	if ! apk add libev libsodium libudns boost boost-system boost-program_options libltdl7 liblua5.3-5.3 libcares coreutils-base64 coreutils-nohup; then
 		echo "WARNING: Some dependencies may have failed to update. Installation will continue..."
 		echo "警告：部分依赖更新可能失败。安装将继续..."
 	fi
