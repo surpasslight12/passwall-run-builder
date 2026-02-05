@@ -92,6 +92,7 @@ log_info "检测到 PassWall 版本：$pw_ver"
 # Update package lists with retry logic
 MAX_RETRIES=3
 RETRY_DELAY=5
+MAX_DELAY=30
 for attempt in $(seq 1 $MAX_RETRIES); do
 	log_info "Updating package lists (attempt $attempt/$MAX_RETRIES)..."
 	log_info "正在更新软件源列表 (尝试 $attempt/$MAX_RETRIES)..."
@@ -109,7 +110,11 @@ for attempt in $(seq 1 $MAX_RETRIES); do
 		log_warning "Update failed, retrying in ${RETRY_DELAY}s..."
 		log_warning "更新失败，${RETRY_DELAY}秒后重试..."
 		sleep $RETRY_DELAY
+		# Exponential backoff with cap
 		RETRY_DELAY=$((RETRY_DELAY * 2))
+		if [ $RETRY_DELAY -gt $MAX_DELAY ]; then
+			RETRY_DELAY=$MAX_DELAY
+		fi
 	fi
 done
 

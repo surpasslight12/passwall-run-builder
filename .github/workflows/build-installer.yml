@@ -202,7 +202,8 @@ jobs:
           log_info "SDK cache hash: $SDK_HASH"
           
           # Date-based key for periodic cache refresh (weekly)
-          WEEK_KEY=$(date +%Y-W%V)
+          # Using %G (ISO year) with %V (ISO week) for correct week numbers at year boundaries
+          WEEK_KEY=$(date +%G-W%V)
           echo "week-key=$WEEK_KEY" >> $GITHUB_OUTPUT
           log_info "Week key: $WEEK_KEY"
           
@@ -300,22 +301,41 @@ jobs:
           log_group_end
 
       - name: Install Go (latest version)
-        if: steps.cache-go.outputs.cache-hit != 'true' || !hashFiles('/usr/local/go/bin/go')
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
           
           log_group_start "Installing Go for OpenWrt SDK"
           
+          # Check if Go is already installed and working
+          if command -v go >/dev/null 2>&1 && go version >/dev/null 2>&1; then
+            INSTALLED_GO=$(go version | awk '{print $3}' | sed 's/go//')
+            log_info "Go already installed: $INSTALLED_GO"
+            log_info "Skipping Go installation"
+            log_group_end
+            exit 0
+          fi
+          
+          log_info "Go not found or not working, installing..."
+          
           # Download and install the latest stable Go version from official source
-          # This will be used by the OpenWrt SDK build system for compiling Go packages
           # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
           
           log_info "Fetching latest Go version..."
           
           GO_VERSION=""
-          retry_with_backoff 3 5 60 "Fetching Go version" \
-            'GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text | head -1 | sed "s/go//") && [ -n "$GO_VERSION" ]'
+          for attempt in 1 2 3; do
+            log_info "Attempt $attempt/3: Fetching Go version..."
+            GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text 2>/dev/null | head -1 | sed 's/go//' || true)
+            if [ -n "$GO_VERSION" ]; then
+              log_info "Got Go version: $GO_VERSION"
+              break
+            fi
+            if [ $attempt -lt 3 ]; then
+              log_warning "Failed to fetch Go version, retrying in 10s..."
+              sleep 10
+            fi
+          done
           
           if [ -z "$GO_VERSION" ]; then
             log_error "Failed to fetch latest Go version from go.dev after retries"
@@ -327,12 +347,28 @@ jobs:
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
           log_info "Downloading Go ${GO_VERSION}..."
-          retry_with_backoff 3 10 120 "Downloading Go tarball" \
-            "wget -q 'https://go.dev/dl/${GO_TARBALL}' -O '/tmp/${GO_TARBALL}'"
+          for attempt in 1 2 3; do
+            log_info "Attempt $attempt/3: Downloading Go tarball..."
+            if wget -q "https://go.dev/dl/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"; then
+              log_info "Download successful"
+              break
+            fi
+            if [ $attempt -lt 3 ]; then
+              log_warning "Download failed, retrying in 20s..."
+              sleep 20
+            else
+              log_error "Failed to download Go after 3 attempts"
+              exit 1
+            fi
+          done
           
           log_info "Extracting Go..."
           sudo rm -rf /usr/local/go
-          sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+          if ! sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"; then
+            log_error "Failed to extract Go tarball"
+            rm -f "/tmp/${GO_TARBALL}"
+            exit 1
+          fi
           rm -f "/tmp/${GO_TARBALL}"
           
           log_info "Setting up Go environment..."
@@ -349,19 +385,54 @@ jobs:
           log_group_end
 
       - name: Install Rust toolchain
-        if: steps.cache-rust.outputs.cache-hit != 'true'
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
           
           log_group_start "Installing Rust toolchain for OpenWrt SDK"
           
+          # Check if Rust is already installed and working
+          if command -v rustc >/dev/null 2>&1 && rustc --version >/dev/null 2>&1; then
+            INSTALLED_RUST=$(rustc --version | awk '{print $2}')
+            log_info "Rust already installed: $INSTALLED_RUST"
+            # Ensure musl target is available
+            if [ -f "$HOME/.cargo/env" ]; then
+              source "$HOME/.cargo/env"
+              echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+            fi
+            if rustup target list --installed | grep -q x86_64-unknown-linux-musl; then
+              log_info "musl target already installed"
+              log_info "Skipping Rust installation"
+              log_group_end
+              exit 0
+            else
+              log_info "Adding musl target..."
+              rustup target add x86_64-unknown-linux-musl
+              log_group_end
+              exit 0
+            fi
+          fi
+          
+          log_info "Rust not found or not working, installing..."
+          
           # Install Rust using rustup (official Rust installer)
           # Required for shadow-tls, shadowsocks-rust packages
           
           log_info "Installing rustup..."
-          retry_with_backoff 3 10 120 "Installing rustup" \
-            "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
+          for attempt in 1 2 3; do
+            log_info "Attempt $attempt/3: Installing rustup..."
+            if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable; then
+              log_info "Rustup installation successful"
+              break
+            fi
+            if [ $attempt -lt 3 ]; then
+              log_warning "Rustup installation failed, retrying in 20s..."
+              sleep 20
+            else
+              log_error "Failed to install rustup after 3 attempts"
+              exit 1
+            fi
+          done
           
           log_info "Setting up Rust environment..."
           source "$HOME/.cargo/env"
@@ -378,29 +449,6 @@ jobs:
           else
             log_error "Rust installation verification failed"
             exit 1
-          fi
-          
-          log_group_end
-
-      - name: Verify Rust installation (from cache)
-        if: steps.cache-rust.outputs.cache-hit == 'true'
-        run: |
-          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
-          log_group_start "Verifying cached Rust installation"
-          
-          if [ -f "$HOME/.cargo/env" ]; then
-            source "$HOME/.cargo/env"
-            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          fi
-          
-          if rustc --version && cargo --version; then
-            log_info "Cached Rust toolchain verified"
-          else
-            log_warning "Cached Rust not working, will reinstall"
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-            source "$HOME/.cargo/env"
-            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-            rustup target add x86_64-unknown-linux-musl
           fi
           
           log_group_end
@@ -677,11 +725,11 @@ jobs:
           NPROC=$(nproc)
           log_info "Starting parallel build with $NPROC jobs..."
           
-          if make package/luci-app-passwall/compile -j"$NPROC" V=s 2>&1; then
+          if make package/luci-app-passwall/compile -j"$NPROC" V=s; then
             log_info "luci-app-passwall compiled successfully (parallel)"
           else
             log_warning "Parallel build failed, retrying with single thread..."
-            if make package/luci-app-passwall/compile V=s 2>&1; then
+            if make package/luci-app-passwall/compile V=s; then
               log_info "luci-app-passwall compiled successfully (single-threaded)"
             else
               log_error "Failed to compile luci-app-passwall"
@@ -718,12 +766,12 @@ jobs:
             fi
             
             if [ -n "$PKG_PATH" ]; then
-              if make "$PKG_PATH/compile" -j"$NPROC" V=s 2>&1; then
+              if make "$PKG_PATH/compile" -j"$NPROC" V=s; then
                 log_info "Successfully built: $pkg"
                 BUILT_COUNT=$((BUILT_COUNT + 1))
               else
                 log_warning "Parallel build failed for $pkg, trying single thread..."
-                if make "$PKG_PATH/compile" V=s 2>&1; then
+                if make "$PKG_PATH/compile" V=s; then
                   log_info "Successfully built (single-threaded): $pkg"
                   BUILT_COUNT=$((BUILT_COUNT + 1))
                 else
@@ -740,7 +788,7 @@ jobs:
           done
           
           log_info "Building: luci-i18n-passwall-zh-cn"
-          make package/luci-i18n-passwall-zh-cn/compile -j"$NPROC" 2>&1 || log_warning "luci-i18n-passwall-zh-cn compilation failed (non-critical)"
+          make package/luci-i18n-passwall-zh-cn/compile -j"$NPROC" || log_warning "luci-i18n-passwall-zh-cn compilation failed (non-critical)"
           
           log_info "Build summary: $BUILT_COUNT packages built successfully, $FAILED_COUNT failed"
           if [ -n "$FAILED_PKGS" ]; then
