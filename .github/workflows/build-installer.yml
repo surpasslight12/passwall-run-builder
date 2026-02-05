@@ -6,6 +6,12 @@ on:
       - 'v*'
   workflow_dispatch:
 
+env:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  LOG_LEVEL: INFO
+  # Cache version - increment to invalidate all caches
+  CACHE_VERSION: v1
+
 jobs:
   build-installer:
     runs-on: ubuntu-latest
@@ -16,174 +22,501 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup logging functions
+        id: logging
+        run: |
+          # Create logging functions script for reuse across steps
+          cat > "$GITHUB_WORKSPACE/.github-actions-log.sh" << 'EOF'
+          #!/bin/bash
+          # GitHub Actions enhanced logging functions
+          
+          # Get current timestamp in ISO 8601 format
+          timestamp() {
+            date -u +"%Y-%m-%dT%H:%M:%SZ"
+          }
+          
+          # Log levels: DEBUG=0, INFO=1, WARNING=2, ERROR=3
+          get_log_level_num() {
+            case "${LOG_LEVEL:-INFO}" in
+              DEBUG) echo 0 ;;
+              INFO) echo 1 ;;
+              WARNING) echo 2 ;;
+              ERROR) echo 3 ;;
+              *) echo 1 ;;
+            esac
+          }
+          
+          log_debug() {
+            if [ "$(get_log_level_num)" -le 0 ]; then
+              echo "::debug::[$(timestamp)] $*"
+            fi
+          }
+          
+          log_info() {
+            if [ "$(get_log_level_num)" -le 1 ]; then
+              echo "[$(timestamp)] [INFO] $*"
+            fi
+          }
+          
+          log_warning() {
+            if [ "$(get_log_level_num)" -le 2 ]; then
+              echo "::warning::[$(timestamp)] $*"
+            fi
+          }
+          
+          log_error() {
+            echo "::error::[$(timestamp)] $*"
+          }
+          
+          log_group_start() {
+            echo "::group::$*"
+          }
+          
+          log_group_end() {
+            echo "::endgroup::"
+          }
+          
+          # Enhanced error handler with context
+          handle_error() {
+            local exit_code=$1
+            local error_msg=$2
+            local context=${3:-"Unknown context"}
+            
+            log_error "Error in $context: $error_msg (exit code: $exit_code)"
+            
+            # Add troubleshooting hints based on error type
+            case "$error_msg" in
+              *"network"*|*"connection"*|*"timeout"*)
+                log_info "Troubleshooting: Check network connectivity and retry"
+                ;;
+              *"permission"*|*"denied"*)
+                log_info "Troubleshooting: Check file permissions and ownership"
+                ;;
+              *"not found"*|*"no such"*)
+                log_info "Troubleshooting: Verify file/directory exists and path is correct"
+                ;;
+            esac
+            
+            return $exit_code
+          }
+          
+          # Retry function with exponential backoff
+          retry_with_backoff() {
+            local max_retries=${1:-3}
+            local initial_delay=${2:-5}
+            local max_delay=${3:-300}
+            local context=${4:-"operation"}
+            shift 4
+            local cmd="$@"
+            
+            local attempt=1
+            local delay=$initial_delay
+            
+            while [ $attempt -le $max_retries ]; do
+              log_info "Attempt $attempt/$max_retries: $context"
+              
+              if eval "$cmd"; then
+                log_info "Success: $context completed on attempt $attempt"
+                return 0
+              fi
+              
+              local exit_code=$?
+              
+              if [ $attempt -eq $max_retries ]; then
+                log_error "Failed: $context after $max_retries attempts"
+                return $exit_code
+              fi
+              
+              log_warning "Attempt $attempt failed, retrying in ${delay}s..."
+              sleep $delay
+              
+              # Exponential backoff with max cap
+              delay=$((delay * 2))
+              if [ $delay -gt $max_delay ]; then
+                delay=$max_delay
+              fi
+              
+              attempt=$((attempt + 1))
+            done
+          }
+          EOF
+          chmod +x "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          echo "Logging functions initialized"
+
       - name: Load OpenWrt SDK config
         run: |
-          if [ -f config/openwrt-sdk.conf ]; then
-            echo "Using config/openwrt-sdk.conf as OpenWrt SDK config"
-            # 文件内容为 KEY=VALUE 形式，直接写入 GITHUB_ENV 供后续步骤使用
-            cat config/openwrt-sdk.conf | grep -v '^#' | sed '/^$/d' >> "$GITHUB_ENV"
-          else
-            echo "config/openwrt-sdk.conf not found" >&2
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          
+          log_group_start "Loading OpenWrt SDK configuration"
+          
+          CONFIG_FILE="config/openwrt-sdk.conf"
+          
+          if [ ! -f "$CONFIG_FILE" ]; then
+            log_error "Configuration file not found: $CONFIG_FILE"
+            log_info "Please ensure config/openwrt-sdk.conf exists with OPENWRT_SDK_URL defined"
             exit 1
           fi
+          
+          log_info "Using $CONFIG_FILE as OpenWrt SDK config"
+          
+          # Validate config file is not empty
+          if [ ! -s "$CONFIG_FILE" ]; then
+            log_error "Configuration file is empty: $CONFIG_FILE"
+            exit 1
+          fi
+          
+          # Parse and validate configuration
+          while IFS= read -r line || [ -n "$line" ]; do
+            # Skip comments and empty lines
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "${line// }" ]] && continue
+            
+            # Validate KEY=VALUE format
+            if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+              echo "$line" >> "$GITHUB_ENV"
+              log_debug "Loaded config: $line"
+            else
+              log_warning "Skipping invalid config line: $line"
+            fi
+          done < "$CONFIG_FILE"
+          
+          # Validate required OPENWRT_SDK_URL is set
+          SDK_URL=$(grep -E '^OPENWRT_SDK_URL=' "$CONFIG_FILE" | head -1 | cut -d'=' -f2-)
+          if [ -z "$SDK_URL" ]; then
+            log_error "OPENWRT_SDK_URL is not defined in $CONFIG_FILE"
+            exit 1
+          fi
+          
+          log_info "SDK URL configured: $SDK_URL"
+          log_group_end
+
+      - name: Generate cache keys
+        id: cache-keys
+        run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Generating cache keys"
+          
+          # Generate cache key based on SDK URL hash
+          SDK_HASH=$(echo "${{ env.OPENWRT_SDK_URL }}" | sha256sum | cut -c1-16)
+          echo "sdk-hash=$SDK_HASH" >> $GITHUB_OUTPUT
+          log_info "SDK cache hash: $SDK_HASH"
+          
+          # Date-based key for periodic cache refresh (weekly)
+          WEEK_KEY=$(date +%Y-W%V)
+          echo "week-key=$WEEK_KEY" >> $GITHUB_OUTPUT
+          log_info "Week key: $WEEK_KEY"
+          
+          # Passwall ref key if specified
+          PASSWALL_KEY="${{ env.PASSWALL_LUCI_REF || 'latest' }}"
+          echo "passwall-key=$PASSWALL_KEY" >> $GITHUB_OUTPUT
+          log_info "PassWall key: $PASSWALL_KEY"
+          
+          log_group_end
+
+      - name: Cache OpenWrt SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: openwrt-sdk
+          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cache-keys.outputs.sdk-hash }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-sdk-
+
+      - name: Cache Go modules
+        id: cache-go
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ env.CACHE_VERSION }}-go-${{ steps.cache-keys.outputs.week-key }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-go-
+
+      - name: Cache Rust/Cargo
+        id: cache-rust
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cache-keys.outputs.week-key }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-rust-
+
+      - name: Cache OpenWrt feeds
+        id: cache-feeds
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt-sdk/feeds
+            openwrt-sdk/package/feeds
+          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cache-keys.outputs.week-key }}-${{ steps.cache-keys.outputs.passwall-key }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-feeds-${{ steps.cache-keys.outputs.week-key }}-
+            ${{ env.CACHE_VERSION }}-feeds-
+
+      - name: Report cache status
+        run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Cache status report"
+          
+          log_info "SDK cache hit: ${{ steps.cache-sdk.outputs.cache-hit || 'false' }}"
+          log_info "Go cache hit: ${{ steps.cache-go.outputs.cache-hit || 'false' }}"
+          log_info "Rust cache hit: ${{ steps.cache-rust.outputs.cache-hit || 'false' }}"
+          log_info "Feeds cache hit: ${{ steps.cache-feeds.outputs.cache-hit || 'false' }}"
+          
+          if [ "${{ steps.cache-sdk.outputs.cache-hit }}" = "true" ]; then
+            log_info "Using cached SDK - skipping download"
+          else
+            log_info "SDK cache miss - will download fresh"
+          fi
+          
+          log_group_end
 
       - name: Install build dependencies and makeself
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libncurses5-dev gawk gettext unzip file \
-            libssl-dev wget python3 git ca-certificates makeself zstd
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Installing build dependencies"
+          
+          log_info "Updating package lists..."
+          if ! sudo apt-get update; then
+            log_warning "apt-get update had issues, continuing anyway..."
+          fi
+          
+          log_info "Installing required packages..."
+          PACKAGES="build-essential libncurses5-dev gawk gettext unzip file libssl-dev wget python3 git ca-certificates makeself zstd"
+          
+          if ! sudo apt-get install -y $PACKAGES; then
+            log_error "Failed to install build dependencies"
+            log_info "Packages attempted: $PACKAGES"
+            exit 1
+          fi
+          
+          log_info "Build dependencies installed successfully"
+          log_group_end
 
       - name: Install Go (latest version)
+        if: steps.cache-go.outputs.cache-hit != 'true' || !hashFiles('/usr/local/go/bin/go')
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Installing latest Go for OpenWrt SDK"
-          echo "=========================================="
+          
+          log_group_start "Installing Go for OpenWrt SDK"
           
           # Download and install the latest stable Go version from official source
           # This will be used by the OpenWrt SDK build system for compiling Go packages
           # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
-          # NOTE: We install system Go instead of using golang from feeds because
-          # feeds only provide older versions that may not meet the requirements of latest PassWall dependencies
           
-          echo "Fetching latest Go version..."
-          GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+          log_info "Fetching latest Go version..."
+          
+          GO_VERSION=""
+          retry_with_backoff 3 5 60 "Fetching Go version" \
+            'GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text | head -1 | sed "s/go//") && [ -n "$GO_VERSION" ]'
           
           if [ -z "$GO_VERSION" ]; then
-            echo "[ERROR] Failed to fetch latest Go version from go.dev"
-            echo "[ERROR] Please check your internet connection or go.dev availability"
+            log_error "Failed to fetch latest Go version from go.dev after retries"
+            log_info "Troubleshooting: Check internet connection and go.dev availability"
             exit 1
           fi
           
-          echo "Latest Go version: ${GO_VERSION}"
+          log_info "Latest Go version: ${GO_VERSION}"
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
-          echo "Downloading Go ${GO_VERSION}..."
-          wget "https://go.dev/dl/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"
+          log_info "Downloading Go ${GO_VERSION}..."
+          retry_with_backoff 3 10 120 "Downloading Go tarball" \
+            "wget -q 'https://go.dev/dl/${GO_TARBALL}' -O '/tmp/${GO_TARBALL}'"
           
-          echo "Extracting Go..."
+          log_info "Extracting Go..."
           sudo rm -rf /usr/local/go
           sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+          rm -f "/tmp/${GO_TARBALL}"
           
-          echo "Setting up Go environment..."
+          log_info "Setting up Go environment..."
           echo "/usr/local/go/bin" >> $GITHUB_PATH
           
           # Verify installation
-          /usr/local/go/bin/go version
-          echo "[SUCCESS] Go ${GO_VERSION} installed successfully and added to PATH"
+          if /usr/local/go/bin/go version; then
+            log_info "Go ${GO_VERSION} installed successfully"
+          else
+            log_error "Go installation verification failed"
+            exit 1
+          fi
+          
+          log_group_end
 
       - name: Install Rust toolchain
+        if: steps.cache-rust.outputs.cache-hit != 'true'
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Installing Rust toolchain for OpenWrt SDK"
-          echo "=========================================="
+          
+          log_group_start "Installing Rust toolchain for OpenWrt SDK"
           
           # Install Rust using rustup (official Rust installer)
-          # This will be used by the OpenWrt SDK build system for compiling Rust packages
           # Required for shadow-tls, shadowsocks-rust packages
-          # NOTE: We install system Rust instead of building from feeds because:
-          # 1. Building Rust compiler from source takes too long in CI (often >30 minutes)
-          # 2. It frequently fails with build errors in CI environment
-          # 3. System rustup provides stable, pre-built toolchains that work reliably
-          # 4. We need to add the x86_64-unknown-linux-musl target for OpenWrt SDK cross-compilation
           
-          echo "Installing rustup..."
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          log_info "Installing rustup..."
+          retry_with_backoff 3 10 120 "Installing rustup" \
+            "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
           
-          echo "Setting up Rust environment..."
+          log_info "Setting up Rust environment..."
           source "$HOME/.cargo/env"
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           
           # Add musl target for OpenWrt cross-compilation
-          echo "Adding x86_64-unknown-linux-musl target..."
+          log_info "Adding x86_64-unknown-linux-musl target..."
           rustup target add x86_64-unknown-linux-musl
           
           # Verify installation
-          rustc --version
-          cargo --version
-          rustup target list --installed
-          echo "[SUCCESS] Rust toolchain installed successfully and added to PATH"
+          if rustc --version && cargo --version; then
+            log_info "Rust toolchain installed successfully"
+            rustup target list --installed
+          else
+            log_error "Rust installation verification failed"
+            exit 1
+          fi
+          
+          log_group_end
+
+      - name: Verify Rust installation (from cache)
+        if: steps.cache-rust.outputs.cache-hit == 'true'
+        run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Verifying cached Rust installation"
+          
+          if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          fi
+          
+          if rustc --version && cargo --version; then
+            log_info "Cached Rust toolchain verified"
+          else
+            log_warning "Cached Rust not working, will reinstall"
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+            source "$HOME/.cargo/env"
+            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+            rustup target add x86_64-unknown-linux-musl
+          fi
+          
+          log_group_end
 
       - name: Download and extract OpenWrt SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         env:
           TERM: dumb
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Downloading OpenWrt SDK"
-          echo "=========================================="
+          
+          log_group_start "Downloading OpenWrt SDK"
+          
           mkdir -p openwrt-sdk
           cd openwrt-sdk
-          echo "SDK URL: $OPENWRT_SDK_URL"
+          
+          log_info "SDK URL: $OPENWRT_SDK_URL"
           
           SDK_FILE=$(basename "$OPENWRT_SDK_URL")
-          echo "SDK File: $SDK_FILE"
-          wget "$OPENWRT_SDK_URL" -O "$SDK_FILE"
+          log_info "SDK File: $SDK_FILE"
           
-          echo "Extracting SDK..."
+          log_info "Downloading SDK (this may take a while)..."
+          retry_with_backoff 3 30 300 "Downloading SDK" \
+            "wget -q '$OPENWRT_SDK_URL' -O '$SDK_FILE'"
+          
+          if [ ! -f "$SDK_FILE" ]; then
+            log_error "SDK download failed - file not found"
+            exit 1
+          fi
+          
+          SDK_SIZE=$(du -h "$SDK_FILE" | cut -f1)
+          log_info "SDK downloaded successfully (size: $SDK_SIZE)"
+          
+          log_info "Extracting SDK..."
           if [[ "$SDK_FILE" == *.tar.zst ]]; then
             tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1
           elif [[ "$SDK_FILE" == *.tar.xz ]]; then
             tar xf "$SDK_FILE" --strip-components=1
           else
-            echo "[ERROR] Unsupported SDK archive format: $SDK_FILE" >&2
+            log_error "Unsupported SDK archive format: $SDK_FILE"
             exit 1
           fi
-          echo "[SUCCESS] SDK extracted successfully"
+          
+          # Clean up archive to save space
+          rm -f "$SDK_FILE"
+          
+          log_info "SDK extracted successfully"
+          log_group_end
+
+      - name: Verify cached SDK
+        if: steps.cache-sdk.outputs.cache-hit == 'true'
+        run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Verifying cached SDK"
+          
+          if [ -d "openwrt-sdk" ] && [ -f "openwrt-sdk/scripts/feeds" ]; then
+            log_info "Cached SDK verified successfully"
+            ls -la openwrt-sdk/
+          else
+            log_error "Cached SDK appears corrupted, will need to re-download"
+            rm -rf openwrt-sdk
+            exit 1
+          fi
+          
+          log_group_end
 
       - name: Configure feeds and PassWall sources
         working-directory: openwrt-sdk
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Configuring feeds"
-          echo "=========================================="
+          
+          log_group_start "Configuring feeds"
+          
           if [ -f feeds.conf.default ]; then
             cp feeds.conf.default feeds.conf
-            echo "[SUCCESS] Copied feeds.conf.default to feeds.conf"
+            log_info "Copied feeds.conf.default to feeds.conf"
           else
-            echo "[WARNING] feeds.conf.default not found, creating minimal feeds.conf" >&2
-            # Create minimal feeds.conf with packages and luci feeds
-            # Using default branches (no version specified) allows OpenWrt SDK to automatically
-            # select the appropriate branch based on the SDK version, ensuring compatibility.
-            # This is the recommended approach for OpenWrt SDK builds.
+            log_warning "feeds.conf.default not found, creating minimal feeds.conf"
             echo "src-git packages https://github.com/openwrt/packages.git" > feeds.conf
             echo "src-git luci https://github.com/openwrt/luci.git" >> feeds.conf
-            echo "[SUCCESS] Created minimal feeds.conf with packages and luci feeds"
+            log_info "Created minimal feeds.conf with packages and luci feeds"
           fi
           
-          echo "Current feeds.conf:"
+          log_info "Current feeds.conf:"
           cat feeds.conf
           
-          # Function to update feeds with retry logic
+          # Check if feeds are already cached
+          FEEDS_CACHED="${{ steps.cache-feeds.outputs.cache-hit }}"
+          
+          # Enhanced feeds update function with retry logic
           update_feeds_with_retry() {
             local max_retries=3
             local retry_delay=30
             
             for attempt in $(seq 1 $max_retries); do
-              echo "[Attempt $attempt/$max_retries] Updating feeds..."
-              if ./scripts/feeds update -a; then
-                echo "[SUCCESS] Feeds updated successfully"
+              log_info "Attempt $attempt/$max_retries: Updating feeds..."
+              if ./scripts/feeds update -a 2>&1; then
+                log_info "Feeds updated successfully on attempt $attempt"
                 return 0
               else
-                echo "[WARNING] Feeds update failed on attempt $attempt"
+                log_warning "Feeds update failed on attempt $attempt"
                 if [ $attempt -lt $max_retries ]; then
-                  echo "Waiting ${retry_delay}s before retry..."
+                  log_info "Waiting ${retry_delay}s before retry..."
                   sleep $retry_delay
                   retry_delay=$((retry_delay * 2))
                 fi
               fi
             done
             
-            echo "[ERROR] All retry attempts failed, trying GitHub mirrors..."
+            log_warning "All retry attempts failed, trying GitHub mirrors..."
             
-            # Replace git.openwrt.org URLs with GitHub mirror URLs in feeds.conf
+            # Replace git.openwrt.org URLs with GitHub mirror URLs
             if [ -f feeds.conf ]; then
-              echo "[INFO] Switching to GitHub mirrors..."
+              log_info "Switching to GitHub mirrors..."
               sed -i \
                 -e 's|https://git.openwrt.org/openwrt/openwrt.git|https://github.com/openwrt/openwrt.git|g' \
                 -e 's|https://git.openwrt.org/feed/packages.git|https://github.com/openwrt/packages.git|g' \
@@ -192,64 +525,80 @@ jobs:
                 -e 's|https://git.openwrt.org/feed/telephony.git|https://github.com/openwrt/telephony.git|g' \
                 feeds.conf
               
-              echo "[INFO] Updated feeds.conf with GitHub mirrors:"
+              log_info "Updated feeds.conf with GitHub mirrors:"
               cat feeds.conf
-              echo ""
               
-              echo "[INFO] Retrying with GitHub mirrors..."
+              log_info "Retrying with GitHub mirrors..."
               if ./scripts/feeds update -a; then
-                echo "[SUCCESS] Feeds updated successfully using GitHub mirrors"
+                log_info "Feeds updated successfully using GitHub mirrors"
                 return 0
               fi
             fi
             
-            echo "[ERROR] Failed to update feeds even with GitHub mirrors"
+            log_error "Failed to update feeds even with GitHub mirrors"
             return 1
           }
           
-          echo "Updating base feeds..."
-          update_feeds_with_retry
+          if [ "$FEEDS_CACHED" = "true" ] && [ -d "feeds/packages" ] && [ -d "feeds/luci" ]; then
+            log_info "Using cached feeds, running index update only..."
+            ./scripts/feeds update -i
+          else
+            log_info "Updating base feeds..."
+            update_feeds_with_retry
+          fi
           
-          echo ""
-          echo "=========================================="
-          echo "Setting up PassWall sources"
-          echo "=========================================="
+          log_group_end
+          
+          log_group_start "Setting up PassWall sources"
+          
+          # Remove conflicting packages from feeds
+          log_info "Removing conflicting packages from feeds..."
           rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
           
-          echo "Cloning openwrt-passwall-packages..."
-          git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
+          # Clone PassWall packages with retry
+          log_info "Cloning openwrt-passwall-packages..."
+          rm -rf package/passwall-packages
+          retry_with_backoff 3 10 120 "Cloning passwall-packages" \
+            "git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages"
           
+          # Clone PassWall LuCI app with retry
           rm -rf feeds/luci/applications/luci-app-passwall
-          echo "Cloning openwrt-passwall (luci)..."
-          git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
+          log_info "Cloning openwrt-passwall (luci)..."
+          rm -rf package/passwall-luci
+          retry_with_backoff 3 10 120 "Cloning passwall-luci" \
+            "git clone --depth=1 https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci"
           
           if [ -n "${PASSWALL_LUCI_REF:-}" ]; then
-            echo "Checking out PASSWALL_LUCI_REF: $PASSWALL_LUCI_REF"
+            log_info "Checking out PASSWALL_LUCI_REF: $PASSWALL_LUCI_REF"
             git -C package/passwall-luci fetch --all --tags
-            git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF"
+            if ! git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF"; then
+              log_error "Failed to checkout ref: $PASSWALL_LUCI_REF"
+              exit 1
+            fi
           fi
-          echo "[SUCCESS] PassWall sources configured"
+          
+          log_info "PassWall sources configured successfully"
+          log_group_end
 
       - name: Install build dependencies
         working-directory: openwrt-sdk
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Installing build dependencies"
-          echo "=========================================="
+          
+          log_group_start "Installing build dependencies"
+          
           # Refresh feeds index after PassWall sources were added
+          log_info "Refreshing feeds index..."
           ./scripts/feeds update -i
           
-          echo "Verifying system toolchain versions..."
-          echo "System Go version:"
-          go version || echo "[WARNING] Go not found in PATH"
-          echo "System Rust version:"
-          rustc --version || echo "[WARNING] Rust not found in PATH"
-          cargo --version || echo "[WARNING] Cargo not found in PATH"
-          echo ""
+          log_info "Verifying system toolchain versions..."
+          log_info "System Go version: $(go version 2>/dev/null || echo 'Not found')"
+          log_info "System Rust version: $(rustc --version 2>/dev/null || echo 'Not found')"
+          log_info "System Cargo version: $(cargo --version 2>/dev/null || echo 'Not found')"
           
-          echo "Installing runtime dependencies..."
-          ./scripts/feeds install \
+          log_info "Installing runtime dependencies..."
+          if ! ./scripts/feeds install \
             libev libmbedtls libsodium libopenssl libpcre2 libudns \
             boost boost-program_options boost-system \
             ca-bundle c-ares pcre2 zlib libubox libubus \
@@ -257,26 +606,34 @@ jobs:
             ucode-mod-ubus ucode-mod-math libucode \
             coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
             libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
-            iwinfo openssl libnl-tiny
+            iwinfo openssl libnl-tiny; then
+            log_warning "Some dependencies may not be available, continuing..."
+          fi
           
-          echo "Installing LuCI base..."
-          ./scripts/feeds install luci-base
+          log_info "Installing LuCI base..."
+          ./scripts/feeds install luci-base || log_warning "luci-base installation had issues"
           
-          echo "Installing luci-app-passwall..."
-          ./scripts/feeds install luci-app-passwall
-          echo "[SUCCESS] Dependencies installed"
+          log_info "Installing luci-app-passwall..."
+          if ! ./scripts/feeds install luci-app-passwall; then
+            log_error "Failed to install luci-app-passwall"
+            exit 1
+          fi
+          
+          log_info "Build dependencies installed successfully"
+          log_group_end
 
       - name: Configure build options
         working-directory: openwrt-sdk
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Configuring build options"
-          echo "=========================================="
-          echo "Running defconfig..."
+          
+          log_group_start "Configuring build options"
+          
+          log_info "Running initial defconfig..."
           yes '' | make defconfig
           
-          echo "Enabling PassWall packages in config..."
+          log_info "Enabling PassWall packages in config..."
           cat >> .config << 'EOF'
           CONFIG_PACKAGE_chinadns-ng=m
           CONFIG_PACKAGE_dns2socks=m
@@ -302,37 +659,57 @@ jobs:
           CONFIG_PACKAGE_xray-core=m
           CONFIG_PACKAGE_xray-plugin=m
           EOF
+          
+          log_info "Running final defconfig..."
           yes '' | make defconfig
-          echo "[SUCCESS] Build configured"
+          
+          log_info "Build configuration completed"
+          log_group_end
 
       - name: Compile luci-app-passwall
         working-directory: openwrt-sdk
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Compiling luci-app-passwall"
-          echo "=========================================="
-          make package/luci-app-passwall/compile -j"$(nproc)" V=s || {
-            echo "[WARNING] Parallel build failed, retrying with single thread"
-            make package/luci-app-passwall/compile V=s
-          }
-          echo "[SUCCESS] luci-app-passwall compiled"
+          
+          log_group_start "Compiling luci-app-passwall"
+          
+          NPROC=$(nproc)
+          log_info "Starting parallel build with $NPROC jobs..."
+          
+          if make package/luci-app-passwall/compile -j"$NPROC" V=s 2>&1; then
+            log_info "luci-app-passwall compiled successfully (parallel)"
+          else
+            log_warning "Parallel build failed, retrying with single thread..."
+            if make package/luci-app-passwall/compile V=s 2>&1; then
+              log_info "luci-app-passwall compiled successfully (single-threaded)"
+            else
+              log_error "Failed to compile luci-app-passwall"
+              exit 1
+            fi
+          fi
+          
+          log_group_end
 
       - name: Compile dependency packages
         working-directory: openwrt-sdk
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Building PassWall dependency packages"
-          echo "=========================================="
+          
+          log_group_start "Building PassWall dependency packages"
           
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
             trojan-plus tuic-client v2ray-geodata v2ray-plugin xray-core xray-plugin"
           
+          NPROC=$(nproc)
+          BUILT_COUNT=0
+          FAILED_COUNT=0
+          FAILED_PKGS=""
+          
           for pkg in $PASSWALL_DEPS; do
-            echo ""
-            echo "--- Building: $pkg ---"
+            log_info "Building: $pkg"
             PKG_PATH=""
             if [ -d "package/passwall-packages/$pkg" ]; then
               PKG_PATH="package/passwall-packages/$pkg"
@@ -341,32 +718,40 @@ jobs:
             fi
             
             if [ -n "$PKG_PATH" ]; then
-              make "$PKG_PATH/compile" -j"$(nproc)" V=s 2>&1 || {
-                echo "[WARNING] Failed to compile $pkg (parallel), trying single thread"
-                make "$PKG_PATH/compile" V=s 2>&1 || {
-                  echo "[WARNING] Failed to compile $pkg, skipping"
-                }
-              }
+              if make "$PKG_PATH/compile" -j"$NPROC" V=s 2>&1; then
+                log_info "Successfully built: $pkg"
+                BUILT_COUNT=$((BUILT_COUNT + 1))
+              else
+                log_warning "Parallel build failed for $pkg, trying single thread..."
+                if make "$PKG_PATH/compile" V=s 2>&1; then
+                  log_info "Successfully built (single-threaded): $pkg"
+                  BUILT_COUNT=$((BUILT_COUNT + 1))
+                else
+                  log_warning "Failed to compile: $pkg (skipping)"
+                  FAILED_COUNT=$((FAILED_COUNT + 1))
+                  FAILED_PKGS="$FAILED_PKGS $pkg"
+                fi
+              fi
             else
-              echo "[WARNING] Package $pkg not found in expected locations"
+              log_warning "Package not found: $pkg"
+              FAILED_COUNT=$((FAILED_COUNT + 1))
+              FAILED_PKGS="$FAILED_PKGS $pkg"
             fi
           done
           
-          echo ""
-          echo "--- Building: luci-i18n-passwall-zh-cn ---"
-          make package/luci-i18n-passwall-zh-cn/compile -j"$(nproc)" || true
+          log_info "Building: luci-i18n-passwall-zh-cn"
+          make package/luci-i18n-passwall-zh-cn/compile -j"$NPROC" 2>&1 || log_warning "luci-i18n-passwall-zh-cn compilation failed (non-critical)"
           
-          echo ""
-          echo "=========================================="
-          echo "Skipping global package install/index to avoid building unrelated packages"
-          echo "=========================================="
+          log_info "Build summary: $BUILT_COUNT packages built successfully, $FAILED_COUNT failed"
+          if [ -n "$FAILED_PKGS" ]; then
+            log_warning "Failed packages:$FAILED_PKGS"
+          fi
           
-          # List what was actually built
-          echo ""
-          echo "Checking built packages:"
-          find bin/packages -name "*.apk" -type f | head -20 || echo "No .apk files found"
+          # Check for built packages
+          log_info "Checking built packages:"
+          find bin/packages -name "*.apk" -type f | head -20 || log_warning "No .apk files found"
           
-          echo "[SUCCESS] Dependency package compilation completed"
+          log_group_end
 
       - name: Prepare version parser
         run: |
@@ -399,21 +784,22 @@ jobs:
         # Use bash for compgen glob checks in this step.
         shell: bash
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Collecting built packages"
-          echo "=========================================="
+          
+          log_group_start "Collecting built packages"
           
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
           mkdir -p "$GITHUB_WORKSPACE/built-packages"
           
+          log_info "Collecting main PassWall packages..."
           find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
-          find bin/packages \( -name "luci-i18n-passwall-zh-cn-*.apk" -o -name "luci-i18n-passwall-zh-cn_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || echo "[INFO] Chinese i18n package not found (non-critical)"
+          find bin/packages \( -name "luci-i18n-passwall-zh-cn-*.apk" -o -name "luci-i18n-passwall-zh-cn_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || log_info "Chinese i18n package not found (non-critical)"
           
-          echo "Main packages collected:"
-          ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || echo "  No main packages found"
+          log_info "Main packages collected:"
+          ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || log_warning "No main packages found"
           
-          # PassWall dependency packages compiled from SDK source (search patterns used below).
+          # PassWall dependency packages compiled from SDK source
           DEPENDENCY_PATTERNS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server \
             shadowsocks-rust-sslocal shadowsocks-rust-ssserver \
@@ -421,9 +807,8 @@ jobs:
             simple-obfs-client sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
           
-          echo ""
-          echo "Searching for dependency packages in bin/packages..."
-          echo "Directory structure:"
+          log_info "Searching for dependency packages..."
+          log_debug "Directory structure:"
           find bin/packages -type d | head -10
           
           source "$GITHUB_WORKSPACE/extract-version.sh"
@@ -432,15 +817,14 @@ jobs:
             find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
           done
           
-          echo "Built packages found: $(find "$GITHUB_WORKSPACE/built-packages/" -name "*.apk" 2>/dev/null | wc -l)"
+          BUILT_PKG_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.apk" 2>/dev/null | wc -l)
+          log_info "Built packages found: $BUILT_PKG_COUNT"
           
-          echo ""
-          echo "=========================================="
-          echo "Selecting compiled packages"
-          echo "=========================================="
+          log_info "Selecting compiled packages..."
           printf "%-35s %-15s\n" "Package" "Version"
           printf "%-35s %-15s\n" "-----------------------------------" "---------------"
           
+          COLLECTED_COUNT=0
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
             BUILT_PKG=""
             BUILT_VER=""
@@ -456,15 +840,14 @@ jobs:
             if [ -n "$BUILT_PKG" ]; then
               printf "%-35s %-15s\n" "$pkg_prefix" "$BUILT_VER"
               cp "$BUILT_PKG" "$GITHUB_WORKSPACE/payload/depends/"
+              COLLECTED_COUNT=$((COLLECTED_COUNT + 1))
             else
               printf "%-35s %-15s\n" "$pkg_prefix" "(none)"
             fi
           done
           
-          echo ""
-          echo "=========================================="
-          echo "Package Collection Summary"
-          echo "=========================================="
+          log_info "Package collection summary: $COLLECTED_COUNT packages collected"
+          
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
             if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}-*.apk" -o -name "${pkg_prefix}_*.apk" \) -print -quit 2>/dev/null)" ]; then
@@ -473,115 +856,176 @@ jobs:
           done
           
           if [ -n "$MISSING_PKGS" ]; then
-            echo "[INFO] The following packages are missing and will not be in the installer:"
+            log_warning "The following packages are missing and will not be in the installer:"
             for pkg in $MISSING_PKGS; do
               echo "  - $pkg"
             done
-            echo ""
-            echo "[INFO] These packages may have failed to compile in the SDK build."
+            log_info "These packages may have failed to compile in the SDK build"
           else
-            echo "[SUCCESS] All dependency packages collected successfully!"
+            log_info "All dependency packages collected successfully!"
           fi
+          
+          log_group_end
 
       - name: Validate final packages
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          echo "=========================================="
-          echo "Validating final packages"
-          echo "=========================================="
+          
+          log_group_start "Validating final packages"
           
           DEP_COUNT=$(find "$GITHUB_WORKSPACE/payload/depends/" -name "*.apk" | wc -l)
           
           if [ "$DEP_COUNT" -eq 0 ]; then
-            echo "[ERROR] No dependency APK files found in payload/depends" >&2
-            echo "[INFO] Dependency compilation did not produce any packages" >&2
+            log_error "No dependency APK files found in payload/depends"
+            log_info "Dependency compilation did not produce any packages"
             exit 1
           fi
           
-          # Package count explanation:
-          # DEPENDENCY_PATTERNS lists 26 PassWall dependency package patterns.
-          # Go and Rust are installed system-wide from official sources.
-          # Most packages should compile successfully with proper toolchains.
-          # Minimum expected: 10 packages (some may fail to compile)
-          # With all packages compiled: up to 26 packages
+          # Package count validation
           MIN_EXPECTED_PACKAGES=10
           if [ "$DEP_COUNT" -lt "$MIN_EXPECTED_PACKAGES" ]; then
-            echo "[WARNING] Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-26)"
-            echo "[INFO] Some packages may have failed to compile"
+            log_warning "Only $DEP_COUNT dependency packages found (expected $MIN_EXPECTED_PACKAGES-26)"
+            log_info "Some packages may have failed to compile"
+          else
+            log_info "Found $DEP_COUNT dependency packages"
           fi
           
-          echo ""
-          echo "Main packages:"
+          log_info "Main packages:"
           find "$GITHUB_WORKSPACE/payload/" -maxdepth 1 -name "*.apk" | xargs -r -n1 basename | sort | sed 's/^/  - /'
-          echo ""
-          echo "Dependency packages (total: $DEP_COUNT):"
+          
+          log_info "Dependency packages (total: $DEP_COUNT):"
           ls -1 "$GITHUB_WORKSPACE/payload/depends/" | sort | sed 's/^/  - /'
-          echo ""
-          echo "[SUCCESS] Package validation completed"
+          
+          log_info "Package validation completed"
+          log_group_end
 
       - name: Validate payload
         # Use bash for compgen glob checks in this step.
         shell: bash
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          
+          log_group_start "Validating payload"
+          
+          log_info "Payload contents:"
           ls -l payload
-          test -f payload/install.sh
-          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) -print -quit 2>/dev/null)" ]; then
-            echo "[ERROR] luci-app-passwall package not found in payload" >&2
+          
+          if [ ! -f payload/install.sh ]; then
+            log_error "install.sh not found in payload"
             exit 1
           fi
-          # luci-i18n-passwall-zh-cn may fail to compile due to SDK Kconfig issues - make it optional
-          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-i18n-passwall-zh-cn-*.apk' -o -name 'luci-i18n-passwall-zh-cn_*.apk' \) -print -quit 2>/dev/null)" ]; then
-            echo "[INFO] Chinese i18n package not found - continuing without it"
+          log_info "install.sh exists"
+          
+          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) -print -quit 2>/dev/null)" ]; then
+            log_error "luci-app-passwall package not found in payload"
+            exit 1
           fi
-          test -d payload/depends
+          log_info "luci-app-passwall package found"
+          
+          if [ -z "$(find payload -maxdepth 1 -type f \( -name 'luci-i18n-passwall-zh-cn-*.apk' -o -name 'luci-i18n-passwall-zh-cn_*.apk' \) -print -quit 2>/dev/null)" ]; then
+            log_info "Chinese i18n package not found - continuing without it"
+          else
+            log_info "Chinese i18n package found"
+          fi
+          
+          if [ ! -d payload/depends ]; then
+            log_error "payload/depends directory not found"
+            exit 1
+          fi
+          log_info "payload/depends directory exists"
+          
+          log_info "Payload validation completed"
+          log_group_end
 
       - name: Prepare payload
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          
+          log_group_start "Preparing payload"
+          
           mkdir -p build/payload
           cp -r payload/* build/payload/
           chmod +x build/payload/install.sh
+          
+          log_info "Payload prepared successfully"
+          log_group_end
 
       - name: Build self-extracting installer
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          
+          log_group_start "Building self-extracting installer"
+          
           cd build
-          # 从 luci-app-passwall_*.apk 文件名中抽取版本号，例如：
-          # luci-app-passwall_26.1.25-r1_all.apk -> 26.1.25
           source "$GITHUB_WORKSPACE/extract-version.sh"
+          
           PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -n1)
           if [ -z "$PW_FILE" ]; then
-            echo "[ERROR] luci-app-passwall package not found in payload" >&2
+            log_error "luci-app-passwall package not found in payload"
             exit 1
           fi
+          
           PW_FULL=$(extract_version "$PW_FILE" "luci-app-passwall")
           PW_VER=${PW_FULL%%-*}
-          # 从 OPENWRT_SDK_URL 提取架构与 SDK 版本
+          log_info "PassWall version: $PW_VER"
+          
+          # Extract architecture and SDK version from URL
           ARCH_SEG=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]\+/[^/]\+\)/.*#\1#p')
           if [ -z "$ARCH_SEG" ]; then
             ARCH="unknown"
+            log_warning "Could not detect architecture from SDK URL"
           else
             ARCH=$(echo "$ARCH_SEG" | tr '/' '_')
           fi
+          log_info "Target architecture: $ARCH"
 
           SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9.]\+\)-.*#\1#p')
           if [ -z "$SDK_VERSION" ]; then
             SDK_VERSION="unknown"
+            log_warning "Could not detect SDK version from SDK URL"
           fi
+          log_info "SDK version: $SDK_VERSION"
 
           RUN_NAME="passwall_${PW_VER}_${ARCH}_sdk_${SDK_VERSION}.run"
           LABEL="passwall_${PW_VER}_with_sdk_${SDK_VERSION}"
           echo "RUN_NAME=${RUN_NAME}" >> $GITHUB_ENV
           echo "LABEL=${LABEL}" >> $GITHUB_ENV
-          makeself --nox11 \
-            payload \
-            "../${RUN_NAME}" \
-            "${LABEL}" \
-            ./install.sh
+          
+          log_info "Building installer: $RUN_NAME"
+          if makeself --nox11 payload "../${RUN_NAME}" "${LABEL}" ./install.sh; then
+            log_info "Installer built successfully"
+          else
+            log_error "Failed to build installer"
+            exit 1
+          fi
+          
+          log_group_end
 
       - name: Verify installer
         run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          
+          log_group_start "Verifying installer"
+          
+          log_info "File info:"
           file "${RUN_NAME}"
+          
+          log_info "Installer info:"
           sh "${RUN_NAME}" --info
-          sh "${RUN_NAME}" --check
+          
+          log_info "Running integrity check..."
+          if sh "${RUN_NAME}" --check; then
+            log_info "Installer verification passed"
+          else
+            log_error "Installer verification failed"
+            exit 1
+          fi
+          
+          INSTALLER_SIZE=$(du -h "${RUN_NAME}" | cut -f1)
+          log_info "Installer size: $INSTALLER_SIZE"
+          
+          log_group_end
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

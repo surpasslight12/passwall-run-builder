@@ -9,6 +9,9 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - 生成一键安装的 `.run` 包
 - 支持自定义 SDK 版本与架构
 - 适配 OpenWrt 25.12+ APK 包管理器
+- **缓存机制**：自动缓存 SDK、Go/Rust 工具链和 feeds，加速后续构建
+- **增强日志**：结构化日志输出，支持 DEBUG/INFO/WARNING/ERROR 级别
+- **重试机制**：网络操作自动重试，支持指数退避
 
 ## 快速开始 | Quick Start
 
@@ -43,6 +46,26 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - `luci-i18n-passwall-zh-cn` 为可选包，若编译失败不会影响主包打包。
 - 依赖包编译失败会被跳过，仅打包成功产物。
 
+### 缓存说明 | Cache Details
+
+工作流使用 GitHub Actions Cache 来加速构建：
+
+- **SDK 缓存**：根据 SDK URL 哈希缓存整个 SDK 目录
+- **Go 缓存**：缓存 Go 模块和构建缓存
+- **Rust 缓存**：缓存 Cargo 注册表和 rustup
+- **Feeds 缓存**：缓存 OpenWrt feeds 目录
+
+缓存按周更新，如需强制刷新可修改 `CACHE_VERSION` 环境变量。
+
+### 日志级别 | Log Levels
+
+可通过 `LOG_LEVEL` 环境变量调整日志详细程度：
+
+- `DEBUG`：最详细，包含调试信息
+- `INFO`：默认级别，包含一般信息
+- `WARNING`：仅显示警告和错误
+- `ERROR`：仅显示错误
+
 ## 系统要求 | Requirements
 
 - OpenWrt 25.12+（APK 包管理器）
@@ -54,6 +77,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - **Kconfig 警告**：属正常提示，不影响编译。
 - **部分包编译失败**：查看 Actions 日志，失败包会被跳过。
 - **旧版 OpenWrt**：24.10 及更早版本需使用旧版脚本或自行修改。
+- **缓存问题**：如遇缓存导致的构建问题，可增加 `CACHE_VERSION` 值来清除缓存。
 
 ## 项目结构 | Structure
 
