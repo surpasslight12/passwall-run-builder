@@ -913,7 +913,40 @@ jobs:
           
           log_info "Collecting main PassWall packages..."
           find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
-          find bin/packages \( -name "luci-i18n-passwall-zh-cn-*.apk" -o -name "luci-i18n-passwall-zh-cn_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \; 2>/dev/null || log_info "Chinese i18n package not found (non-critical)"
+          
+          source "$GITHUB_WORKSPACE/extract-version.sh"
+          
+          select_latest_pkg() {
+            local prefix="$1"
+            local target_dir="$2"
+            local latest_file=""
+            local latest_ver=""
+            while IFS= read -r -d '' file; do
+              local ver
+              ver=$(extract_version "$file" "$prefix")
+              if [ -z "$latest_ver" ]; then
+                latest_ver="$ver"
+                latest_file="$file"
+                continue
+              fi
+              if [ "$(printf '%s\n' "$latest_ver" "$ver" | sort -V | tail -n1)" = "$ver" ]; then
+                latest_ver="$ver"
+                latest_file="$file"
+              fi
+            done < <(find bin/packages -type f \( -name "${prefix}-*.apk" -o -name "${prefix}_*.apk" \) -print0)
+            
+            if [ -n "$latest_file" ]; then
+              cp "$latest_file" "$target_dir/"
+              log_info "Selected $prefix package: $(basename "$latest_file")"
+              return 0
+            fi
+            
+            return 1
+          }
+          
+          if ! select_latest_pkg "luci-i18n-passwall-zh-cn" "$GITHUB_WORKSPACE/payload"; then
+            log_info "Chinese i18n package not found (non-critical)"
+          fi
           
           log_info "Main packages collected:"
           ls -lh "$GITHUB_WORKSPACE/payload/"*.apk 2>/dev/null || log_warning "No main packages found"
@@ -929,8 +962,6 @@ jobs:
           log_info "Searching for dependency packages..."
           log_debug "Directory structure:"
           find bin/packages -type d | head -10
-          
-          source "$GITHUB_WORKSPACE/extract-version.sh"
 
           for pkg_name in $DEPENDENCY_PATTERNS; do
             find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
