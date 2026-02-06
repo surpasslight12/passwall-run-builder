@@ -914,6 +914,10 @@ jobs:
           log_info "Collecting main PassWall packages..."
           find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
           
+          if [ ! -f "$GITHUB_WORKSPACE/extract-version.sh" ]; then
+            log_error "extract-version.sh not found"
+            exit 1
+          fi
           source "$GITHUB_WORKSPACE/extract-version.sh"
           
           select_latest_pkg() {
@@ -921,9 +925,21 @@ jobs:
             local target_dir="$2"
             local latest_file=""
             local latest_ver=""
+            if [ -z "$prefix" ] || [ -z "$target_dir" ]; then
+              log_warning "select_latest_pkg requires prefix and target_dir"
+              return 1
+            fi
+            if [ ! -d "$target_dir" ]; then
+              log_warning "Target directory not found: $target_dir"
+              return 1
+            fi
             while IFS= read -r -d '' file; do
               local ver
               ver=$(extract_version "$file" "$prefix")
+              if [ -z "$ver" ]; then
+                log_warning "Skipping $prefix package with empty version: $(basename "$file")"
+                continue
+              fi
               if [ -z "$latest_ver" ]; then
                 latest_ver="$ver"
                 latest_file="$file"
