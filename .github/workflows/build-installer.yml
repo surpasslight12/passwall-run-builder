@@ -333,24 +333,14 @@ jobs:
           # so we must keep Go as up-to-date as possible.
           
           log_info "Fetching latest Go version from go.dev..."
-          
           GO_VERSION=""
-          for attempt in 1 2 3; do
-            log_info "Attempt $attempt/3: Fetching Go version..."
-            GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text 2>/dev/null | head -1 | sed 's/go//' || true)
-            if [ -n "$GO_VERSION" ]; then
-              log_info "Got Go version: $GO_VERSION"
-              break
-            fi
-            if [ $attempt -lt 3 ]; then
-              log_warning "Failed to fetch Go version, retrying in 10s..."
-              sleep 10
-            fi
-          done
-          
-          if [ -z "$GO_VERSION" ]; then
+          # The function sets GO_VERSION in the outer scope (standard bash pattern)
+          fetch_go_version() {
+            GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text 2>/dev/null | head -1 | sed 's/go//')
+            [ -n "$GO_VERSION" ]
+          }
+          if ! retry_with_backoff 3 10 60 "Fetching Go version" fetch_go_version; then
             log_error "Failed to fetch latest Go version from go.dev after retries"
-            log_info "Troubleshooting: Check internet connection and go.dev availability"
             exit 1
           fi
           
@@ -370,24 +360,11 @@ jobs:
           fi
           
           # Download and install the latest stable Go version from official source
-          # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
           log_info "Downloading Go ${GO_VERSION}..."
-          for attempt in 1 2 3; do
-            log_info "Attempt $attempt/3: Downloading Go tarball..."
-            if wget -q "https://go.dev/dl/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"; then
-              log_info "Download successful"
-              break
-            fi
-            if [ $attempt -lt 3 ]; then
-              log_warning "Download failed, retrying in 20s..."
-              sleep 20
-            else
-              log_error "Failed to download Go after 3 attempts"
-              exit 1
-            fi
-          done
+          retry_with_backoff 3 20 120 "Downloading Go tarball" \
+            "wget -q 'https://go.dev/dl/${GO_TARBALL}' -O '/tmp/${GO_TARBALL}'"
           
           log_info "Extracting Go..."
           sudo rm -rf /usr/local/go
@@ -446,20 +423,8 @@ jobs:
           # Required for shadow-tls, shadowsocks-rust packages
           
           log_info "Installing rustup..."
-          for attempt in 1 2 3; do
-            log_info "Attempt $attempt/3: Installing rustup..."
-            if curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable; then
-              log_info "Rustup installation successful"
-              break
-            fi
-            if [ $attempt -lt 3 ]; then
-              log_warning "Rustup installation failed, retrying in 20s..."
-              sleep 20
-            else
-              log_error "Failed to install rustup after 3 attempts"
-              exit 1
-            fi
-          done
+          retry_with_backoff 3 20 120 "Installing rustup" \
+            "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
           
           log_info "Setting up Rust environment..."
           source "$HOME/.cargo/env"
@@ -584,6 +549,24 @@ jobs:
 
           if [ "$REPLACED" -eq 0 ]; then
             log_info "No SDK Go directories found; system Go will be used when SDK creates them"
+          fi
+
+          # Patch GOTOOLCHAIN from "local" to "auto" in the SDK Go build system.
+          # The SDK defaults to GOTOOLCHAIN=local which prevents Go from downloading
+          # a newer toolchain when upstream packages (e.g. xray-core) bump their
+          # go.mod minimum beyond the bundled version.
+          PATCHED=0
+          while IFS= read -r f; do
+            if grep -q 'GOTOOLCHAIN=local' "$f"; then
+              sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "$f"
+              log_info "Patched GOTOOLCHAIN to auto in $f"
+              PATCHED=$((PATCHED + 1))
+            fi
+          done < <(find openwrt-sdk/feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) 2>/dev/null)
+          if [ "$PATCHED" -gt 0 ]; then
+            log_info "Patched GOTOOLCHAIN in $PATCHED file(s)"
+          else
+            log_info "No GOTOOLCHAIN=local found in SDK Go config (may already be set to auto)"
           fi
 
           log_group_end
@@ -858,13 +841,13 @@ jobs:
             fi
           done
           
-          log_info "Building: luci-i18n-passwall-zh-cn"
-          if ! make_with_retry "package/luci-i18n-passwall-zh-cn/compile" "luci-i18n-passwall-zh-cn"; then
-            if package_artifacts_exist "luci-i18n-passwall-zh-cn"; then
-              log_info "luci-i18n-passwall-zh-cn already built; using cached package"
-            else
-              log_warning "luci-i18n-passwall-zh-cn compilation failed (non-critical)"
-            fi
+          # luci-i18n-passwall-zh-cn is produced by the luci-app-passwall build
+          # step; there is no standalone compile target for it.  Just verify
+          # the artifact exists.
+          if package_artifacts_exist "luci-i18n-passwall-zh-cn"; then
+            log_info "luci-i18n-passwall-zh-cn found (built with luci-app-passwall)"
+          else
+            log_info "luci-i18n-passwall-zh-cn not found (non-critical)"
           fi
           
           log_info "Build summary: $BUILT_COUNT packages built successfully, $FAILED_COUNT failed"
@@ -915,7 +898,6 @@ jobs:
           log_group_start "Collecting built packages"
           
           mkdir -p "$GITHUB_WORKSPACE/payload" "$GITHUB_WORKSPACE/payload/depends"
-          mkdir -p "$GITHUB_WORKSPACE/built-packages"
           
           log_info "Collecting main PassWall packages..."
           find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/payload/" \;
@@ -981,51 +963,24 @@ jobs:
             simple-obfs-client sing-box tcping trojan-plus tuic-client \
             v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin"
           
-          log_info "Searching for dependency packages..."
-          log_debug "Directory structure:"
-          find bin/packages -type d | head -10
-
-          for pkg_name in $DEPENDENCY_PATTERNS; do
-            find bin/packages -type f \( -name "${pkg_name}_*.apk" -o -name "${pkg_name}-*.apk" \) -exec cp {} "$GITHUB_WORKSPACE/built-packages/" \;
-          done
-          
-          BUILT_PKG_COUNT=$(find "$GITHUB_WORKSPACE/built-packages/" -name "*.apk" 2>/dev/null | wc -l)
-          log_info "Built packages found: $BUILT_PKG_COUNT"
-          
-          log_info "Selecting compiled packages..."
+          log_info "Collecting dependency packages..."
           printf "%-35s %-15s\n" "Package" "Version"
           printf "%-35s %-15s\n" "-----------------------------------" "---------------"
           
           COLLECTED_COUNT=0
+          MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            BUILT_PKG=""
-            BUILT_VER=""
-            
-            for f in "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}_"*.apk "$GITHUB_WORKSPACE/built-packages/${pkg_prefix}-"*.apk; do
-              if [ -e "$f" ]; then
-                BUILT_PKG="$f"
-                BUILT_VER=$(extract_version "$f" "$pkg_prefix")
-                break
-              fi
-            done
-            
-            if [ -n "$BUILT_PKG" ]; then
-              printf "%-35s %-15s\n" "$pkg_prefix" "$BUILT_VER"
-              cp "$BUILT_PKG" "$GITHUB_WORKSPACE/payload/depends/"
+            if select_latest_pkg "$pkg_prefix" "$GITHUB_WORKSPACE/payload/depends"; then
+              VER=$(extract_version "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}_*.apk" -o -name "${pkg_prefix}-*.apk" \) -print -quit)" "$pkg_prefix")
+              printf "%-35s %-15s\n" "$pkg_prefix" "$VER"
               COLLECTED_COUNT=$((COLLECTED_COUNT + 1))
             else
               printf "%-35s %-15s\n" "$pkg_prefix" "(none)"
+              MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
             fi
           done
           
           log_info "Package collection summary: $COLLECTED_COUNT packages collected"
-          
-          MISSING_PKGS=""
-          for pkg_prefix in $DEPENDENCY_PATTERNS; do
-            if [ -z "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}-*.apk" -o -name "${pkg_prefix}_*.apk" \) -print -quit 2>/dev/null)" ]; then
-              MISSING_PKGS="$MISSING_PKGS $pkg_prefix"
-            fi
-          done
           
           if [ -n "$MISSING_PKGS" ]; then
             log_warning "The following packages are missing and will not be in the installer:"
