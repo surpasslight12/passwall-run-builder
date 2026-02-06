@@ -306,13 +306,18 @@ jobs:
           
           log_group_start "Installing Go for OpenWrt SDK"
           
+          GO_MIN_VERSION="1.25.6"
+          
           # Check if Go is already installed and working
           if command -v go >/dev/null 2>&1 && go version >/dev/null 2>&1; then
             INSTALLED_GO=$(go version | awk '{print $3}' | sed 's/go//')
-            log_info "Go already installed: $INSTALLED_GO"
-            log_info "Skipping Go installation"
-            log_group_end
-            exit 0
+            if [ -n "$INSTALLED_GO" ] && [ "$(printf "%s\n%s\n" "$GO_MIN_VERSION" "$INSTALLED_GO" | sort -V | head -n1)" = "$GO_MIN_VERSION" ]; then
+              log_info "Go already installed: $INSTALLED_GO (meets >= $GO_MIN_VERSION)"
+              log_info "Skipping Go installation"
+              log_group_end
+              exit 0
+            fi
+            log_warning "Go version $INSTALLED_GO is below required $GO_MIN_VERSION, upgrading..."
           fi
           
           log_info "Go not found or not working, installing..."
@@ -686,7 +691,7 @@ jobs:
             ucode-mod-ubus ucode-mod-math libucode \
             coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
             libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
-            iwinfo openssl libnl-tiny; then
+            iwinfo openssl libnl-tiny golang rust; then
             log_warning "Some dependencies may not be available, continuing..."
           fi
           
