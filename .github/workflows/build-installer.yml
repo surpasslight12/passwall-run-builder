@@ -334,6 +334,7 @@ jobs:
           
           log_info "Fetching latest Go version from go.dev..."
           GO_VERSION=""
+          # The function sets GO_VERSION in the outer scope (standard bash pattern)
           fetch_go_version() {
             GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text 2>/dev/null | head -1 | sed 's/go//')
             [ -n "$GO_VERSION" ]
@@ -970,7 +971,7 @@ jobs:
           MISSING_PKGS=""
           for pkg_prefix in $DEPENDENCY_PATTERNS; do
             if select_latest_pkg "$pkg_prefix" "$GITHUB_WORKSPACE/payload/depends"; then
-              VER=$(extract_version "$(ls -1 "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}"_*.apk "$GITHUB_WORKSPACE/payload/depends/${pkg_prefix}"-*.apk 2>/dev/null | head -1)" "$pkg_prefix")
+              VER=$(extract_version "$(find "$GITHUB_WORKSPACE/payload/depends" -maxdepth 1 -type f \( -name "${pkg_prefix}_*.apk" -o -name "${pkg_prefix}-*.apk" \) -print -quit)" "$pkg_prefix")
               printf "%-35s %-15s\n" "$pkg_prefix" "$VER"
               COLLECTED_COUNT=$((COLLECTED_COUNT + 1))
             else
