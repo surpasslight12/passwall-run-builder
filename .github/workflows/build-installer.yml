@@ -111,23 +111,25 @@ jobs:
             
             local attempt=1
             local delay=$initial_delay
+            local exit_code=0
             
             while [ $attempt -le $max_retries ]; do
               log_info "Attempt $attempt/$max_retries: $context"
               
-              if eval "$cmd"; then
+              exit_code=0
+              eval "$cmd" || exit_code=$?
+              
+              if [ $exit_code -eq 0 ]; then
                 log_info "Success: $context completed on attempt $attempt"
                 return 0
               fi
               
-              local exit_code=$?
-              
               if [ $attempt -eq $max_retries ]; then
-                log_error "Failed: $context after $max_retries attempts"
+                log_error "Failed: $context after $max_retries attempts (exit code: $exit_code)"
                 return $exit_code
               fi
               
-              log_warning "Attempt $attempt failed, retrying in ${delay}s..."
+              log_warning "Attempt $attempt failed (exit code: $exit_code), retrying in ${delay}s..."
               sleep $delay
               
               # Exponential backoff with max cap
@@ -306,31 +308,12 @@ jobs:
           
           log_group_start "Installing Go for OpenWrt SDK"
           
-          GO_MIN_VERSION="1.25.6"
+          # Always fetch the latest stable Go version first so we can compare
+          # against any pre-installed version. Upstream Go-based packages
+          # (xray-core, sing-box, etc.) frequently bump their go.mod minimum,
+          # so we must keep Go as up-to-date as possible.
           
-          version_meets_minimum() {
-            # Go versions use dotted numeric strings (e.g. 1.25.6).
-            [ "$(printf "%s\n%s\n" "$1" "$2" | sort -V | head -n1)" = "$2" ]
-          }
-          
-          # Check if Go is already installed and working
-          if command -v go >/dev/null 2>&1 && go version >/dev/null 2>&1; then
-            INSTALLED_GO=$(go version | awk '{print $3}' | sed 's/go//')
-            if [ -n "$INSTALLED_GO" ] && version_meets_minimum "$INSTALLED_GO" "$GO_MIN_VERSION"; then
-              log_info "Go already installed: $INSTALLED_GO (meets >= $GO_MIN_VERSION)"
-              log_info "Skipping Go installation"
-              log_group_end
-              exit 0
-            fi
-            log_info "Go version $INSTALLED_GO is below required $GO_MIN_VERSION, upgrading..."
-          fi
-          
-          log_info "Go not found or not working, installing..."
-          
-          # Download and install the latest stable Go version from official source
-          # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
-          
-          log_info "Fetching latest Go version..."
+          log_info "Fetching latest Go version from go.dev..."
           
           GO_VERSION=""
           for attempt in 1 2 3; do
@@ -353,6 +336,22 @@ jobs:
           fi
           
           log_info "Latest Go version: ${GO_VERSION}"
+          
+          # Check if Go is already installed at the latest version
+          if command -v go >/dev/null 2>&1 && go version >/dev/null 2>&1; then
+            INSTALLED_GO=$(go version | awk '{print $3}' | sed 's/go//')
+            if [ "$INSTALLED_GO" = "$GO_VERSION" ]; then
+              log_info "Go $INSTALLED_GO is already the latest version, skipping installation"
+              log_group_end
+              exit 0
+            fi
+            log_info "Go $INSTALLED_GO is installed but latest is $GO_VERSION, upgrading..."
+          else
+            log_info "Go not found, installing..."
+          fi
+          
+          # Download and install the latest stable Go version from official source
+          # Required for xray-core, v2ray-plugin, and other Go-based PassWall dependencies
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
           
           log_info "Downloading Go ${GO_VERSION}..."
@@ -531,8 +530,8 @@ jobs:
           log_group_start "Updating SDK Go toolchain"
 
           # The SDK may bundle an older Go version (e.g. 1.24.x) while upstream
-          # packages such as xray-core and v2ray-plugin require Go >= 1.25.
-          # Replace the SDK's Go with the system Go installed earlier.
+          # packages such as xray-core and v2ray-plugin require the latest Go.
+          # Replace every Go directory found in the SDK with the system Go.
           SYSTEM_GO=$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go")
           if [ ! -x "$SYSTEM_GO" ]; then
             log_warning "System Go not found, skipping SDK Go update"
@@ -543,20 +542,29 @@ jobs:
           GOROOT=$("$SYSTEM_GO" env GOROOT)
           log_info "System Go version: $SYSTEM_GO_VER (GOROOT: $GOROOT)"
 
-          SDK_GO_DIR=$(find openwrt-sdk/staging_dir/hostpkg -maxdepth 3 -type d \( -name "go-*" -o -name "go" \) 2>/dev/null | head -1)
-          if [ -z "$SDK_GO_DIR" ]; then
-            SDK_GO_DIR=$(find openwrt-sdk/staging_dir/host -maxdepth 3 -type d \( -name "go-*" -o -name "go" \) 2>/dev/null | head -1)
-          fi
-          if [ -n "$SDK_GO_DIR" ]; then
-            SDK_GO_VER=$("$SDK_GO_DIR/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
-            log_info "SDK Go version: $SDK_GO_VER (at $SDK_GO_DIR)"
-            log_info "Replacing SDK Go with system Go..."
-            rm -rf "$SDK_GO_DIR"
-            cp -a "$GOROOT" "$SDK_GO_DIR"
-            NEW_VER=$("$SDK_GO_DIR/bin/go" version 2>/dev/null | awk '{print $3}')
-            log_info "SDK Go updated to: $NEW_VER"
-          else
-            log_info "SDK Go directory not found under openwrt-sdk/staging_dir; will use system Go until SDK Go is created"
+          REPLACED=0
+          for search_root in openwrt-sdk/staging_dir/hostpkg openwrt-sdk/staging_dir/host; do
+            [ -d "$search_root" ] || continue
+            while IFS= read -r sdk_go_dir; do
+              [ -n "$sdk_go_dir" ] || continue
+              SDK_GO_VER=$("$sdk_go_dir/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
+              log_info "Found SDK Go: $SDK_GO_VER (at $sdk_go_dir)"
+              if [ "$SDK_GO_VER" = "$SYSTEM_GO_VER" ]; then
+                log_info "SDK Go is already up-to-date, skipping"
+                REPLACED=$((REPLACED + 1))
+                continue
+              fi
+              log_info "Replacing SDK Go with system Go..."
+              rm -rf "$sdk_go_dir"
+              cp -a "$GOROOT" "$sdk_go_dir"
+              NEW_VER=$("$sdk_go_dir/bin/go" version 2>/dev/null | awk '{print $3}')
+              log_info "SDK Go updated to: $NEW_VER"
+              REPLACED=$((REPLACED + 1))
+            done < <(find "$search_root" -maxdepth 3 -type d \( -name "go-*" -o -name "go" \) 2>/dev/null)
+          done
+
+          if [ "$REPLACED" -eq 0 ]; then
+            log_info "No SDK Go directories found; system Go will be used when SDK creates them"
           fi
 
           log_group_end
@@ -764,22 +772,34 @@ jobs:
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
+          # Unset CI to avoid Rust panic on llvm.download-ci-llvm=true forbidden under CI
+          unset CI
           
           log_group_start "Compiling luci-app-passwall"
           
           NPROC=$(nproc)
-          log_info "Starting parallel build with $NPROC jobs..."
           
-          if make package/luci-app-passwall/compile -j"$NPROC" V=s; then
-            log_info "luci-app-passwall compiled successfully (parallel)"
-          else
-            log_warning "Parallel build failed, retrying with single thread..."
-            if make package/luci-app-passwall/compile V=s; then
-              log_info "luci-app-passwall compiled successfully (single-threaded)"
-            else
-              log_error "Failed to compile luci-app-passwall"
-              exit 1
+          # Reusable build function: tries parallel first, then single-threaded
+          make_with_retry() {
+            local target="$1"
+            local label="${2:-$target}"
+            if make "$target" -j"$NPROC" V=s; then
+              log_info "Successfully built: $label (parallel)"
+              return 0
             fi
+            log_warning "Parallel build failed for $label, retrying single-threaded..."
+            if make "$target" V=s; then
+              log_info "Successfully built: $label (single-threaded)"
+              return 0
+            fi
+            return 1
+          }
+          
+          log_info "Starting build with $NPROC parallel jobs..."
+          
+          if ! make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall"; then
+            log_error "Failed to compile luci-app-passwall"
+            exit 1
           fi
           
           log_group_end
@@ -805,7 +825,20 @@ jobs:
           package_artifacts_exist() {
             local pkg="$1"
             [ -d bin/packages ] || return 1
-            if find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .; then
+            find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
+          }
+          
+          # Reusable build function: tries parallel first, then single-threaded
+          make_with_retry() {
+            local target="$1"
+            local label="${2:-$target}"
+            if make "$target" -j"$NPROC" V=s; then
+              log_info "Successfully built: $label (parallel)"
+              return 0
+            fi
+            log_warning "Parallel build failed for $label, retrying single-threaded..."
+            if make "$target" V=s; then
+              log_info "Successfully built: $label (single-threaded)"
               return 0
             fi
             return 1
@@ -820,41 +853,28 @@ jobs:
               PKG_PATH="package/$pkg"
             fi
             
-            if [ -n "$PKG_PATH" ]; then
-              if make "$PKG_PATH/compile" -j"$NPROC" V=s; then
-                log_info "Successfully built: $pkg"
-                BUILT_COUNT=$((BUILT_COUNT + 1))
-              else
-                log_info "Parallel build failed for $pkg, trying single thread..."
-                if make "$PKG_PATH/compile" V=s; then
-                  log_info "Successfully built (single-threaded): $pkg"
-                  BUILT_COUNT=$((BUILT_COUNT + 1))
-                else
-                  if package_artifacts_exist "$pkg"; then
-                    log_info "Build failed for $pkg but existing artifacts found; using cached output"
-                    BUILT_COUNT=$((BUILT_COUNT + 1))
-                  else
-                    log_warning "Failed to compile: $pkg (skipping)"
-                    FAILED_COUNT=$((FAILED_COUNT + 1))
-                    FAILED_PKGS="$FAILED_PKGS $pkg"
-                  fi
-                fi
-              fi
-            else
+            if [ -z "$PKG_PATH" ]; then
               log_warning "Package not found: $pkg"
+              FAILED_COUNT=$((FAILED_COUNT + 1))
+              FAILED_PKGS="$FAILED_PKGS $pkg"
+              continue
+            fi
+            
+            if make_with_retry "$PKG_PATH/compile" "$pkg"; then
+              BUILT_COUNT=$((BUILT_COUNT + 1))
+            elif package_artifacts_exist "$pkg"; then
+              log_info "Build failed for $pkg but existing artifacts found; using cached output"
+              BUILT_COUNT=$((BUILT_COUNT + 1))
+            else
+              log_warning "Failed to compile: $pkg (skipping)"
               FAILED_COUNT=$((FAILED_COUNT + 1))
               FAILED_PKGS="$FAILED_PKGS $pkg"
             fi
           done
           
           log_info "Building: luci-i18n-passwall-zh-cn"
-          if make package/luci-i18n-passwall-zh-cn/compile -j"$NPROC" V=s; then
-            log_info "luci-i18n-passwall-zh-cn compiled successfully (parallel)"
-          else
-            log_info "Parallel build failed for luci-i18n-passwall-zh-cn, trying single thread..."
-            if make package/luci-i18n-passwall-zh-cn/compile V=s; then
-              log_info "luci-i18n-passwall-zh-cn compiled successfully (single-threaded)"
-            elif package_artifacts_exist "luci-i18n-passwall-zh-cn"; then
+          if ! make_with_retry "package/luci-i18n-passwall-zh-cn/compile" "luci-i18n-passwall-zh-cn"; then
+            if package_artifacts_exist "luci-i18n-passwall-zh-cn"; then
               log_info "luci-i18n-passwall-zh-cn already built; using cached package"
             else
               log_warning "luci-i18n-passwall-zh-cn compilation failed (non-critical)"
