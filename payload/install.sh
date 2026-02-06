@@ -119,7 +119,7 @@ for attempt in $(seq 1 $MAX_RETRIES); do
 done
 
 # Check for and update legacy dependencies from older firmware versions
-if apk list -I libsodium | grep -Eq "\d.\d.\d{2}-\d" || apk list -I boost | grep -Eq "\d.\d{2}.\d-\d"; then
+if apk list -I libsodium | grep -Eq "[0-9]\.[0-9]\.[0-9][0-9]-[0-9]" || apk list -I boost | grep -Eq "[0-9]\.[0-9][0-9]\.[0-9]-[0-9]"; then
 	log_info "Detected legacy dependency versions from firmware upgrade, updating dependencies..."
 	log_info "检测到旧版本固件升级保留的依赖版本问题，正在更新相关依赖..."
 	if ! apk add libev libsodium libudns boost boost-system boost-program_options libltdl7 liblua5.3-5.3 libcares coreutils-base64 coreutils-nohup; then

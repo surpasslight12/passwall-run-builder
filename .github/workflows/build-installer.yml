@@ -228,8 +228,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
+            openwrt-sdk/dl/go-mod-cache
           key: ${{ env.CACHE_VERSION }}-go-${{ steps.cache-keys.outputs.week-key }}
           restore-keys: |
             ${{ env.CACHE_VERSION }}-go-
@@ -514,6 +513,39 @@ jobs:
             exit 1
           fi
           
+          log_group_end
+
+      - name: Update SDK Go toolchain
+        run: |
+          source "$GITHUB_WORKSPACE/.github-actions-log.sh"
+          log_group_start "Updating SDK Go toolchain"
+
+          # The SDK may bundle an older Go version (e.g. 1.24.x) while upstream
+          # packages such as xray-core and v2ray-plugin require Go >= 1.25.
+          # Replace the SDK's Go with the system Go installed earlier.
+          SYSTEM_GO=$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go")
+          if [ ! -x "$SYSTEM_GO" ]; then
+            log_warning "System Go not found, skipping SDK Go update"
+            log_group_end
+            exit 0
+          fi
+          SYSTEM_GO_VER=$("$SYSTEM_GO" version | awk '{print $3}')
+          GOROOT=$("$SYSTEM_GO" env GOROOT)
+          log_info "System Go version: $SYSTEM_GO_VER (GOROOT: $GOROOT)"
+
+          SDK_GO_DIR=$(find openwrt-sdk/staging_dir/hostpkg/lib -maxdepth 1 -type d -name "go-*" 2>/dev/null | head -1)
+          if [ -n "$SDK_GO_DIR" ]; then
+            SDK_GO_VER=$("$SDK_GO_DIR/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
+            log_info "SDK Go version: $SDK_GO_VER (at $SDK_GO_DIR)"
+            log_info "Replacing SDK Go with system Go..."
+            rm -rf "$SDK_GO_DIR"
+            cp -a "$GOROOT" "$SDK_GO_DIR"
+            NEW_VER=$("$SDK_GO_DIR/bin/go" version 2>/dev/null | awk '{print $3}')
+            log_info "SDK Go updated to: $NEW_VER"
+          else
+            log_warning "SDK Go directory not found under openwrt-sdk/staging_dir/hostpkg/lib/"
+          fi
+
           log_group_end
 
       - name: Configure feeds and PassWall sources
@@ -1028,7 +1060,7 @@ jobs:
           fi
           log_info "Target architecture: $ARCH"
 
-          SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9.]\+\)-.*#\1#p')
+          SDK_VERSION=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9.]\+\(-rc[0-9]\+\)\?\)-.*#\1#p')
           if [ -z "$SDK_VERSION" ]; then
             SDK_VERSION="unknown"
             log_warning "Could not detect SDK version from SDK URL"

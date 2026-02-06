@@ -22,7 +22,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
    ```
 2. **配置 SDK** (`config/openwrt-sdk.conf`)
    ```bash
-   OPENWRT_SDK_URL=https://downloads.openwrt.org/releases/25.12.0/targets/x86/64/openwrt-sdk-25.12.0-x86-64_gcc-14.2.0_musl.Linux-x86_64.tar.zst
+   OPENWRT_SDK_URL=https://downloads.openwrt.org/releases/25.12.0-rc4/targets/x86/64/openwrt-sdk-25.12.0-rc4-x86-64_gcc-14.3.0_musl.Linux-x86_64.tar.zst
    ```
 3. **触发构建**：Actions 手动触发或 push tag
    ```bash
@@ -41,6 +41,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 ## 编译说明 | Build Notes
 
 - 自动安装最新 Go/Rust，用于编译 Go/Rust 依赖包。
+- 自动将 SDK 内置的 Go 更新为系统最新版本，以确保 xray-core、v2ray-plugin 等上游包的 Go 版本要求得到满足。
 - 仅编译 `luci-app-passwall` 与 PassWall 依赖包，跳过 luci-base host tools 以减少构建耗时。
 - 如遇构建问题，可在 `.github/workflows/build-installer.yml` 的编译阶段、`Configure build options` 之后手动补回 `make package/feeds/luci/luci-base/host/compile` 步骤。
 - `luci-i18n-passwall-zh-cn` 为可选包，若编译失败不会影响主包打包。
@@ -51,7 +52,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 工作流使用 GitHub Actions Cache 来加速构建：
 
 - **SDK 缓存**：根据 SDK URL 哈希缓存整个 SDK 目录
-- **Go 缓存**：缓存 Go 模块和构建缓存
+- **Go 缓存**：缓存 SDK 的 Go 模块下载缓存（`openwrt-sdk/dl/go-mod-cache`）
 - **Rust 缓存**：缓存 Cargo 注册表和 rustup
 - **Feeds 缓存**：缓存 OpenWrt feeds 目录
 
