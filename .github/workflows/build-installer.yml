@@ -786,6 +786,7 @@ jobs:
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
+          unset CI
           
           log_group_start "Building PassWall dependency packages"
           
