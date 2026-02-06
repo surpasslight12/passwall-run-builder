@@ -2,8 +2,7 @@
 set -e
 
 # ============================================================
-# PassWall Installer Script
-# Improved error handling and logging
+# PassWall Installer Script for OpenWrt (APK-based)
 # ============================================================
 
 # Logging functions
@@ -37,7 +36,7 @@ trap 'handle_error $LINENO' ERR
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
 
-# Extract version numbers from package filenames
+# ---- Detect package files and extract version strings ----
 pw_pkg=""
 pwzh_pkg=""
 for candidate in luci-app-passwall-*.apk luci-app-passwall_*.apk; do
@@ -52,23 +51,28 @@ for candidate in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; 
 		break
 	fi
 done
+
+# Helper: extract version string from an APK filename.
+# $1 - full package filename (e.g. luci-app-passwall-1.2.3_all.apk)
+# $2 - package name prefix to strip (e.g. luci-app-passwall)
+# Prints the version string (e.g. 1.2.3).
+extract_ver() {
+	local base
+	base=$(basename "$1" | sed -E "s/^$2[-_]//; s/\.apk$//")
+	if echo "$base" | grep -q '_'; then
+		echo "${base%_*}"
+	else
+		echo "${base%-all}"
+	fi
+}
+
 pw_ver=""
-pwzh_ver=""
 if [ -n "$pw_pkg" ]; then
-	pw_base=$(basename "$pw_pkg" | sed -E 's/^luci-app-passwall[-_]//; s/\.apk$//')
-	if echo "$pw_base" | grep -q '_'; then
-		pw_ver="${pw_base%_*}"
-	else
-		pw_ver="${pw_base%-all}"
-	fi
+	pw_ver=$(extract_ver "$pw_pkg" "luci-app-passwall")
 fi
+pwzh_ver=""
 if [ -n "$pwzh_pkg" ]; then
-	pwzh_base=$(basename "$pwzh_pkg" | sed -E 's/^luci-i18n-passwall-zh-cn[-_]//; s/\.apk$//')
-	if echo "$pwzh_base" | grep -q '_'; then
-		pwzh_ver="${pwzh_base%_*}"
-	else
-		pwzh_ver="${pwzh_base%-all}"
-	fi
+	pwzh_ver=$(extract_ver "$pwzh_pkg" "luci-i18n-passwall-zh-cn")
 fi
 
 # Validate versions were extracted successfully
@@ -89,36 +93,37 @@ fi
 log_info "Detected PassWall version: $pw_ver"
 log_info "检测到 PassWall 版本：$pw_ver"
 
-# Update package lists with retry logic
+# ---- Update package lists with retry & exponential backoff ----
 MAX_RETRIES=3
 RETRY_DELAY=5
 MAX_DELAY=30
-for attempt in $(seq 1 $MAX_RETRIES); do
+attempt=1
+while [ $attempt -le $MAX_RETRIES ]; do
 	log_info "Updating package lists (attempt $attempt/$MAX_RETRIES)..."
 	log_info "正在更新软件源列表 (尝试 $attempt/$MAX_RETRIES)..."
 	if apk update; then
 		log_info "Package lists updated successfully"
 		break
-	else
-		if [ $attempt -eq $MAX_RETRIES ]; then
-			log_error "Failed to update package lists after $MAX_RETRIES attempts"
-			log_error "更新软件源列表失败，已尝试 $MAX_RETRIES 次"
-			log_info "Troubleshooting: Check network connection and repository configuration"
-			log_info "排查建议：请检查路由器网络连接以及软件源配置"
-			exit 1
-		fi
-		log_warning "Update failed, retrying in ${RETRY_DELAY}s..."
-		log_warning "更新失败，${RETRY_DELAY}秒后重试..."
-		sleep $RETRY_DELAY
-		# Exponential backoff with cap
-		RETRY_DELAY=$((RETRY_DELAY * 2))
-		if [ $RETRY_DELAY -gt $MAX_DELAY ]; then
-			RETRY_DELAY=$MAX_DELAY
-		fi
 	fi
+	if [ $attempt -eq $MAX_RETRIES ]; then
+		log_error "Failed to update package lists after $MAX_RETRIES attempts"
+		log_error "更新软件源列表失败，已尝试 $MAX_RETRIES 次"
+		log_info "Troubleshooting: Check network connection and repository configuration"
+		log_info "排查建议：请检查路由器网络连接以及软件源配置"
+		exit 1
+	fi
+	log_warning "Update failed, retrying in ${RETRY_DELAY}s..."
+	log_warning "更新失败，${RETRY_DELAY}秒后重试..."
+	sleep $RETRY_DELAY
+	RETRY_DELAY=$((RETRY_DELAY * 2))
+	if [ $RETRY_DELAY -gt $MAX_DELAY ]; then
+		RETRY_DELAY=$MAX_DELAY
+	fi
+	attempt=$((attempt + 1))
 done
 
-# Check for and update legacy dependencies from older firmware versions
+# ---- Upgrade legacy dependencies left over from older firmware ----
+# BusyBox grep: use [0-9] character classes instead of \d
 if apk list -I libsodium | grep -Eq "[0-9]\.[0-9]\.[0-9][0-9]-[0-9]" || apk list -I boost | grep -Eq "[0-9]\.[0-9][0-9]\.[0-9]-[0-9]"; then
 	log_info "Detected legacy dependency versions from firmware upgrade, updating dependencies..."
 	log_info "检测到旧版本固件升级保留的依赖版本问题，正在更新相关依赖..."
@@ -128,9 +133,7 @@ if apk list -I libsodium | grep -Eq "[0-9]\.[0-9]\.[0-9][0-9]-[0-9]" || apk list
 	fi
 fi
 
-# Install PassWall packages
-# Note: For local .apk files with --allow-untrusted, APK requires explicit removal before reinstallation
-# We remove existing packages first, then add the new ones. This is the proper method for local packages.
+# ---- Build the package list ----
 if [ -n "$pwzh_pkg" ]; then
 	set -- "$pw_pkg" "$pwzh_pkg"
 else
@@ -158,41 +161,31 @@ fi
 
 set -- "$@" haproxy
 
+# ---- Install / Reinstall PassWall ----
+# For local .apk files with --allow-untrusted, APK requires explicit removal
+# before reinstallation. Remove existing packages first when same version is detected.
 if apk list -I luci-app-passwall | grep -q "$pw_ver"; then
 	log_info "Same version detected, performing forced reinstallation of PassWall $pw_ver"
 	log_info "发现相同版本，正在执行强制重新安装 PassWall $pw_ver"
-	
-	# Remove existing packages first, then reinstall
+
 	log_info "Removing existing PassWall packages..."
 	log_info "正在移除现有的 PassWall 软件包..."
 	for pkg in luci-app-passwall luci-i18n-passwall-zh-cn; do
 		if apk info -e "$pkg" >/dev/null 2>&1; then
 			log_info "Removing: $pkg"
-			if ! apk del "$pkg"; then
-				log_warning "Failed to remove $pkg, continuing anyway..."
-			fi
+			apk del "$pkg" || log_warning "Failed to remove $pkg, continuing anyway..."
 		fi
 	done
-	
-	log_info "Installing PassWall $pw_ver..."
-	log_info "正在安装 PassWall $pw_ver..."
-	if ! apk add --allow-untrusted "$@"; then
-		log_error "PassWall reinstallation failed"
-		log_error "PassWall 重新安装失败"
-		log_info "Troubleshooting: Check if all dependencies are available"
-		log_info "排查建议：请检查所有依赖是否可用"
-		exit 1
-	fi
-else
-	log_info "Installing PassWall $pw_ver"
-	log_info "正在安装 PassWall $pw_ver"
-	if ! apk add --allow-untrusted "$@"; then
-		log_error "PassWall installation failed"
-		log_error "PassWall 安装失败"
-		log_info "Troubleshooting: Check if all dependencies are available"
-		log_info "排查建议：请检查所有依赖是否可用"
-		exit 1
-	fi
+fi
+
+log_info "Installing PassWall $pw_ver..."
+log_info "正在安装 PassWall $pw_ver..."
+if ! apk add --allow-untrusted "$@"; then
+	log_error "PassWall installation failed"
+	log_error "PassWall 安装失败"
+	log_info "Troubleshooting: Check if all dependencies are available"
+	log_info "排查建议：请检查所有依赖是否可用"
+	exit 1
 fi
 
 log_success "PassWall $pw_ver installed successfully"
