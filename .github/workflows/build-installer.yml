@@ -141,6 +141,25 @@ jobs:
               attempt=$((attempt + 1))
             done
           }
+          
+          # Build helper: tries parallel make first, then falls back to single-threaded.
+          # Usage: make_with_retry <make_target> [label]
+          make_with_retry() {
+            local target="$1"
+            local label="${2:-$target}"
+            local nproc
+            nproc=$(nproc)
+            if make "$target" -j"$nproc" V=s; then
+              log_info "Successfully built: $label (parallel)"
+              return 0
+            fi
+            log_warning "Parallel build failed for $label, retrying single-threaded..."
+            if make "$target" V=s; then
+              log_info "Successfully built: $label (single-threaded)"
+              return 0
+            fi
+            return 1
+          }
           EOF
           chmod +x "$GITHUB_WORKSPACE/.github-actions-log.sh"
           echo "Logging functions initialized"
@@ -772,30 +791,14 @@ jobs:
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -e
-          # Unset CI to avoid Rust panic on llvm.download-ci-llvm=true forbidden under CI
+          # Unset CI to avoid Rust panic on llvm.download-ci-llvm=true forbidden
+          # under CI (affects shadow-tls, shadowsocks-rust and other Rust-based
+          # PassWall dependencies during compilation)
           unset CI
           
           log_group_start "Compiling luci-app-passwall"
           
-          NPROC=$(nproc)
-          
-          # Reusable build function: tries parallel first, then single-threaded
-          make_with_retry() {
-            local target="$1"
-            local label="${2:-$target}"
-            if make "$target" -j"$NPROC" V=s; then
-              log_info "Successfully built: $label (parallel)"
-              return 0
-            fi
-            log_warning "Parallel build failed for $label, retrying single-threaded..."
-            if make "$target" V=s; then
-              log_info "Successfully built: $label (single-threaded)"
-              return 0
-            fi
-            return 1
-          }
-          
-          log_info "Starting build with $NPROC parallel jobs..."
+          log_info "Starting build with $(nproc) parallel jobs..."
           
           if ! make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall"; then
             log_error "Failed to compile luci-app-passwall"
@@ -817,7 +820,6 @@ jobs:
             shadow-tls shadowsocks-libev shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
             trojan-plus tuic-client v2ray-geodata v2ray-plugin xray-core xray-plugin"
           
-          NPROC=$(nproc)
           BUILT_COUNT=0
           FAILED_COUNT=0
           FAILED_PKGS=""
@@ -826,22 +828,6 @@ jobs:
             local pkg="$1"
             [ -d bin/packages ] || return 1
             find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
-          }
-          
-          # Reusable build function: tries parallel first, then single-threaded
-          make_with_retry() {
-            local target="$1"
-            local label="${2:-$target}"
-            if make "$target" -j"$NPROC" V=s; then
-              log_info "Successfully built: $label (parallel)"
-              return 0
-            fi
-            log_warning "Parallel build failed for $label, retrying single-threaded..."
-            if make "$target" V=s; then
-              log_info "Successfully built: $label (single-threaded)"
-              return 0
-            fi
-            return 1
           }
           
           for pkg in $PASSWALL_DEPS; do

@@ -52,7 +52,10 @@ for candidate in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; 
 	fi
 done
 
-# Helper: extract version from APK filename, strip prefix and trailing arch/all segment
+# Helper: extract version string from an APK filename.
+# $1 - full package filename (e.g. luci-app-passwall-1.2.3_all.apk)
+# $2 - package name prefix to strip (e.g. luci-app-passwall)
+# Prints the version string (e.g. 1.2.3).
 extract_ver() {
 	local base
 	base=$(basename "$1" | sed -E "s/^$2[-_]//; s/\.apk$//")
