@@ -819,11 +819,12 @@ jobs:
             fi
           done
 
-          # Verify disk space (need at least 10GB free)
+          # Verify disk space
+          MIN_DISK_GB=10
           AVAIL_KB=$(df / --output=avail | tail -1 | tr -d ' ')
           AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
-          if [ "$AVAIL_GB" -lt 10 ]; then
-            log_error "Insufficient disk space: ${AVAIL_GB}GB available (need at least 10GB)"
+          if [ "$AVAIL_GB" -lt "$MIN_DISK_GB" ]; then
+            log_error "Insufficient disk space: ${AVAIL_GB}GB available (need at least ${MIN_DISK_GB}GB)"
             ERRORS=$((ERRORS + 1))
           else
             log_info "Disk space available: ${AVAIL_GB}GB"
@@ -855,7 +856,7 @@ jobs:
         working-directory: openwrt-sdk
         env:
           FORCE_UNSAFE_CONFIGURE: 1
-          GOPROXY: https://proxy.golang.org,direct
+          GOPROXY: https://proxy.golang.org,https://goproxy.io,direct
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -eo pipefail
@@ -881,7 +882,7 @@ jobs:
         working-directory: openwrt-sdk
         env:
           FORCE_UNSAFE_CONFIGURE: 1
-          GOPROXY: https://proxy.golang.org,direct
+          GOPROXY: https://proxy.golang.org,https://goproxy.io,direct
         run: |
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -eo pipefail
