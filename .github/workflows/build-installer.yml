@@ -5,10 +5,25 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      sdk_url_override:
+        description: 'Override OpenWrt SDK URL (leave empty to use config file)'
+        required: false
+        default: ''
+      debug_enabled:
+        description: 'Enable debug logging'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Log level: DEBUG, INFO, WARNING, ERROR
-  LOG_LEVEL: INFO
+  # Automatically set to DEBUG when debug_enabled input is true
+  LOG_LEVEL: ${{ github.event.inputs.debug_enabled == 'true' && 'DEBUG' || 'INFO' }}
   # Cache version - increment to invalidate all caches
   CACHE_VERSION: v1
 
@@ -145,15 +160,19 @@ jobs:
           
           # Build helper: tries parallel make first, then falls back to single-threaded.
           # On failure, captures the last portion of the build log for debugging.
+          # Includes build timing for performance tracking.
           # Usage: make_with_retry <make_target> [label]
           make_with_retry() {
             local target="$1"
             local label="${2:-$target}"
             local nproc
             local build_log="/tmp/build-${label//\//_}.log"
+            local start_time
             nproc=$(nproc)
+            start_time=$(date +%s)
             if make "$target" -j"$nproc" V=s 2>&1 | tee "$build_log"; then
-              log_info "Successfully built: $label (parallel)"
+              local elapsed=$(( $(date +%s) - start_time ))
+              log_info "Successfully built: $label (parallel, ${elapsed}s)"
               rm -f "$build_log"
               return 0
             fi
@@ -161,11 +180,13 @@ jobs:
             tail -30 "$build_log" 2>/dev/null || true
             log_warning "Retrying single-threaded..."
             if make "$target" V=s 2>&1 | tee "$build_log"; then
-              log_info "Successfully built: $label (single-threaded)"
+              local elapsed=$(( $(date +%s) - start_time ))
+              log_info "Successfully built: $label (single-threaded, ${elapsed}s)"
               rm -f "$build_log"
               return 0
             fi
-            log_error "Build failed for $label, last 50 lines of build log:"
+            local elapsed=$(( $(date +%s) - start_time ))
+            log_error "Build failed for $label after ${elapsed}s, last 50 lines of build log:"
             tail -50 "$build_log" 2>/dev/null || true
             rm -f "$build_log"
             return 1
@@ -211,11 +232,19 @@ jobs:
             fi
           done < "$CONFIG_FILE"
           
-          # Validate required OPENWRT_SDK_URL is set
-          SDK_URL=$(grep -E '^OPENWRT_SDK_URL=' "$CONFIG_FILE" | head -1 | cut -d'=' -f2-)
-          if [ -z "$SDK_URL" ]; then
-            log_error "OPENWRT_SDK_URL is not defined in $CONFIG_FILE"
-            exit 1
+          # Allow workflow_dispatch input to override SDK URL
+          SDK_URL_OVERRIDE="${{ github.event.inputs.sdk_url_override }}"
+          if [ -n "$SDK_URL_OVERRIDE" ]; then
+            log_info "Using SDK URL override from workflow input"
+            echo "OPENWRT_SDK_URL=$SDK_URL_OVERRIDE" >> "$GITHUB_ENV"
+            SDK_URL="$SDK_URL_OVERRIDE"
+          else
+            # Validate required OPENWRT_SDK_URL is set in config
+            SDK_URL=$(grep -E '^OPENWRT_SDK_URL=' "$CONFIG_FILE" | head -1 | cut -d'=' -f2-)
+            if [ -z "$SDK_URL" ]; then
+              log_error "OPENWRT_SDK_URL is not defined in $CONFIG_FILE"
+              exit 1
+            fi
           fi
           
           log_info "SDK URL configured: $SDK_URL"
@@ -316,8 +345,11 @@ jobs:
           df -h /
 
           # Remove large pre-installed toolchains and libraries not needed for SDK build
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
+            /usr/share/swift /usr/local/.ghcup 2>/dev/null || true
           sudo docker image prune --all --force 2>/dev/null || true
+          sudo apt-get clean 2>/dev/null || true
 
           log_info "Disk space after cleanup:"
           df -h /
@@ -764,7 +796,7 @@ jobs:
           log_group_start "Configuring build options"
           
           log_info "Running initial defconfig..."
-          yes '' | make defconfig
+          make defconfig < /dev/null
           
           log_info "Enabling PassWall packages in config..."
           cat >> .config << 'EOF'
@@ -794,7 +826,7 @@ jobs:
           EOF
           
           log_info "Running final defconfig..."
-          yes '' | make defconfig
+          make defconfig < /dev/null
           
           log_info "Build configuration completed"
           log_group_end
@@ -1273,7 +1305,7 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           files: |
@@ -1287,17 +1319,20 @@ jobs:
           source "$GITHUB_WORKSPACE/.github-actions-log.sh" 2>/dev/null || true
           log_group_start "Build diagnostics"
 
-          echo "### Build Environment" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Runner**: $(uname -a)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Go**: $(go version 2>/dev/null || echo 'not available')" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'not available')" >> "$GITHUB_STEP_SUMMARY"
-          echo "- **Disk space**: $(df -h / --output=avail | tail -1 | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Build Environment"
+            echo "- **Runner**: $(uname -a)"
+            echo "- **Go**: $(go version 2>/dev/null || echo 'not available')"
+            echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'not available')"
+            echo "- **Disk space remaining**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+            echo "- **SDK URL**: \`${OPENWRT_SDK_URL:-not set}\`"
 
-          if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
-            INSTALLER_SIZE=$(du -h "${RUN_NAME}" | cut -f1)
-            echo "- **Installer**: ${RUN_NAME} (${INSTALLER_SIZE})" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- **Installer**: not built" >> "$GITHUB_STEP_SUMMARY"
-          fi
+            if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
+              INSTALLER_SIZE=$(du -h "${RUN_NAME}" | cut -f1)
+              echo "- **Installer**: ${RUN_NAME} (${INSTALLER_SIZE})"
+            else
+              echo "- **Installer**: not built"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           log_group_end
