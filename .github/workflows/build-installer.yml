@@ -1324,7 +1324,7 @@ jobs:
             echo "- **Runner**: $(uname -a)"
             echo "- **Go**: $(go version 2>/dev/null || echo 'not available')"
             echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'not available')"
-            echo "- **Disk space remaining**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+            echo "- **Disk space**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
             echo "- **SDK URL**: \`${OPENWRT_SDK_URL:-not set}\`"
 
             if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
