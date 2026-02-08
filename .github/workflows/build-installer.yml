@@ -751,7 +751,8 @@ jobs:
           log_group_start "Configuring build options"
 
           log_info "Resetting previous .config to avoid stale settings..."
-          rm -f .config .config.old tmp/.config-* tmp/.config.in 2>/dev/null || true
+          rm -f .config .config.old \
+            tmp/.config.in tmp/.config-package.in tmp/.config-target.in tmp/.config-feeds.in 2>/dev/null || true
 
           log_info "Running initial defconfig..."
           make defconfig < /dev/null
