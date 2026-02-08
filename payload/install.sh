@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -e
 
 # ============================================================
@@ -26,12 +26,15 @@ log_success() {
 handle_error() {
 	local exit_code=$?
 	local line_number=$1
+	if [ "$exit_code" -eq 0 ]; then
+		return
+	fi
 	log_error "Script failed at line $line_number with exit code $exit_code"
 	log_error "脚本在第 $line_number 行失败，退出码: $exit_code"
 	exit $exit_code
 }
 
-trap 'handle_error $LINENO' ERR
+trap 'handle_error $LINENO' EXIT
 
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
