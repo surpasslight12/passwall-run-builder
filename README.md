@@ -10,7 +10,6 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - 支持自定义 SDK 版本与架构
 - 适配 OpenWrt 25.12+ APK 包管理器
 - **缓存机制**：自动缓存 SDK、Go/Rust 工具链和 feeds，加速后续构建
-- **增强日志**：结构化日志输出，支持 DEBUG/INFO/WARNING/ERROR 级别
 - **重试机制**：网络操作自动重试，支持指数退避
 
 ## 快速开始 | Quick Start
@@ -57,15 +56,6 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - **Feeds 缓存**：缓存 OpenWrt feeds 目录
 
 缓存按周更新，如需强制刷新可修改 `CACHE_VERSION` 环境变量。
-
-### 日志级别 | Log Levels
-
-可通过 `LOG_LEVEL` 环境变量调整日志详细程度：
-
-- `DEBUG`：最详细，包含调试信息
-- `INFO`：默认级别，包含一般信息
-- `WARNING`：仅显示警告和错误
-- `ERROR`：仅显示错误
 
 ## 系统要求 | Requirements
 
