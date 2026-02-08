@@ -28,9 +28,6 @@ handle_error() {
 	if [ -z "$exit_code" ]; then
 		exit_code=$?
 	fi
-	if [ "$exit_code" -eq 0 ]; then
-		return
-	fi
 	log_error "Script failed with exit code $exit_code"
 	log_error "脚本失败，退出码: $exit_code"
 	exit $exit_code
