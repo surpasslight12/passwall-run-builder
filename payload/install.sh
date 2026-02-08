@@ -30,9 +30,7 @@ handle_error() {
 	exit $exit_code
 }
 
-if ! trap 'handle_error $?' ERR 2>/dev/null; then
-	trap 'exit_code=$?; [ "$exit_code" -ne 0 ] && handle_error "$exit_code"' EXIT
-fi
+trap 'exit_code=$?; [ "$exit_code" -ne 0 ] && handle_error "$exit_code"' EXIT
 
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
