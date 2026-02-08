@@ -7,9 +7,34 @@ source "$SCRIPT_DIR/lib.sh"
 SDK_CACHE_HIT="${1:-false}"          # "true" when the cache step hit
 
 # ── Verify / download SDK ───────────────────────────────────────────────────
-if [ "$SDK_CACHE_HIT" = "true" ] && [ -d openwrt-sdk ] && [ -f openwrt-sdk/scripts/feeds ]; then
-  log_info "Cached SDK verified"
+# Validate cached SDK thoroughly to detect corruption or incomplete state
+validate_sdk_cache() {
+  [ -d openwrt-sdk ] || return 1
+  [ -f openwrt-sdk/scripts/feeds ] || return 1
+  [ -f openwrt-sdk/Makefile ] || return 1
+  [ -d openwrt-sdk/staging_dir ] || return 1
+  # Check for critical build tools
+  [ -f openwrt-sdk/staging_dir/host/bin/xz ] || return 1
+  return 0
+}
+
+if [ "$SDK_CACHE_HIT" = "true" ] && validate_sdk_cache; then
+  log_info "Cached SDK validated successfully"
+  # Clean stale build artifacts from cache to prevent masking build failures
+  if [ -d openwrt-sdk/bin/packages ]; then
+    log_info "Cleaning cached build artifacts from bin/packages/"
+    rm -rf openwrt-sdk/bin/packages/* 2>/dev/null || true
+    log_info "Cached build artifacts cleaned"
+  fi
+  # Clean stale config files that may cause build issues
+  if [ -f openwrt-sdk/.config ] || [ -d openwrt-sdk/tmp ]; then
+    log_info "Cleaning stale SDK config files"
+    rm -f openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
+    rm -rf openwrt-sdk/tmp/.config-*.in 2>/dev/null || true
+    log_info "Stale config files cleaned"
+  fi
 else
+  [ "$SDK_CACHE_HIT" = "true" ] && log_warning "Cached SDK validation failed, re-downloading"
   group_start "Downloading OpenWrt SDK"
   rm -rf openwrt-sdk; mkdir -p openwrt-sdk; cd openwrt-sdk
 
