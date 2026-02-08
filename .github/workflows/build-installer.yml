@@ -100,28 +100,36 @@ jobs:
         run: |
           source "$GITHUB_WORKSPACE/scripts/lib.sh"
           group_start "Cache Status Report"
-          echo "SDK cache hit: ${{ steps.cache-sdk.outputs.cache-hit }}"
-          echo "Go cache hit: ${{ steps.cache-go.outputs.cache-hit || 'N/A' }}"
-          echo "Rust cache hit: ${{ steps.cache-rust.outputs.cache-hit || 'N/A' }}"
-          echo "Feeds cache hit: ${{ steps.cache-feeds.outputs.cache-hit }}"
-          if [ "${{ steps.cache-sdk.outputs.cache-hit }}" = "true" ]; then
+          SDK_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
+          GO_HIT="${{ steps.cache-go.outputs.cache-hit }}"
+          RUST_HIT="${{ steps.cache-rust.outputs.cache-hit }}"
+          FEEDS_HIT="${{ steps.cache-feeds.outputs.cache-hit }}"
+          
+          echo "SDK cache hit: ${SDK_HIT:-false}"
+          echo "Go cache hit: ${GO_HIT:-false}"
+          echo "Rust cache hit: ${RUST_HIT:-false}"
+          echo "Feeds cache hit: ${FEEDS_HIT:-false}"
+          
+          if [ "$SDK_HIT" = "true" ]; then
             log_info "SDK cache restored - will validate and clean stale artifacts"
           else
             log_info "SDK cache miss - will download fresh SDK"
           fi
-          if [ "${{ steps.cache-feeds.outputs.cache-hit }}" = "true" ]; then
+          if [ "$FEEDS_HIT" = "true" ]; then
             log_info "Feeds cache restored - will validate integrity"
           else
             log_info "Feeds cache miss - will perform full feed update"
           fi
+          
+          # Generate summary table
           {
             echo "## Cache Diagnostics"
             echo "| Cache Type | Status | Action |"
             echo "|------------|--------|--------|"
-            echo "| SDK | ${{ steps.cache-sdk.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | ${{ steps.cache-sdk.outputs.cache-hit == 'true' && 'Validate & clean artifacts' || 'Fresh download' }} |"
-            echo "| Feeds | ${{ steps.cache-feeds.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | ${{ steps.cache-feeds.outputs.cache-hit == 'true' && 'Validate integrity' || 'Full update' }} |"
-            echo "| Go modules | ${{ steps.cache-go.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | Incremental |"
-            echo "| Rust/Cargo | ${{ steps.cache-rust.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | Incremental |"
+            echo "| SDK | $( [ "$SDK_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$SDK_HIT" = "true" ] && echo 'Validate & clean artifacts' || echo 'Fresh download' ) |"
+            echo "| Feeds | $( [ "$FEEDS_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$FEEDS_HIT" = "true" ] && echo 'Validate integrity' || echo 'Full update' ) |"
+            echo "| Go modules | $( [ "$GO_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
+            echo "| Rust/Cargo | $( [ "$RUST_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
             echo ""
             echo "**Cache Version**: \`${{ env.CACHE_VERSION }}\`"
             echo ""
