@@ -452,7 +452,10 @@ jobs:
           log_group_start "Configuring feeds"
 
           if [ -f feeds.conf.default ]; then
-            cp feeds.conf.default feeds.conf
+            if ! cp feeds.conf.default feeds.conf; then
+              log_error "Failed to copy feeds.conf.default"
+              exit 1
+            fi
           else
             log_warning "feeds.conf.default not found, creating minimal config"
             echo "src-git packages https://github.com/openwrt/packages.git" > feeds.conf
@@ -493,19 +496,23 @@ jobs:
           # --- Patch GOTOOLCHAIN after feeds are available ---
           log_group_start "Patching GOTOOLCHAIN"
 
-          PATCHED=0
-          while IFS= read -r f; do
-            if grep -q 'GOTOOLCHAIN=local' "$f"; then
-              sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "$f"
-              log_info "Patched GOTOOLCHAIN in $f"
-              PATCHED=$((PATCHED + 1))
-            fi
-          done < <(find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) 2>/dev/null)
-
-          if [ "$PATCHED" -gt 0 ]; then
-            log_info "Patched GOTOOLCHAIN in $PATCHED file(s)"
+          if [ ! -d feeds/packages/lang/golang ]; then
+            log_warning "feeds/packages/lang/golang not found, skipping GOTOOLCHAIN patch"
           else
-            log_info "No GOTOOLCHAIN=local found (may already be auto)"
+            PATCHED=0
+            while IFS= read -r f; do
+              if grep -q 'GOTOOLCHAIN=local' "$f"; then
+                sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "$f"
+                log_info "Patched GOTOOLCHAIN in $f"
+                PATCHED=$((PATCHED + 1))
+              fi
+            done < <(find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) 2>/dev/null)
+
+            if [ "$PATCHED" -gt 0 ]; then
+              log_info "Patched GOTOOLCHAIN in $PATCHED file(s)"
+            else
+              log_info "No GOTOOLCHAIN=local found (may already be auto)"
+            fi
           fi
 
           log_group_end
@@ -659,7 +666,7 @@ jobs:
           log_group_start "Building PassWall dependencies"
 
           log_info "Starting builds with $(nproc) parallel jobs..."
-          log_info "Disk before build: $(df -h / | tail -1)"
+          log_info "Disk before build: $(df -h / --output=avail | tail -1 | tr -d ' ') available"
 
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
@@ -724,7 +731,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-          log_info "Disk after build: $(df -h / | tail -1)"
+          log_info "Disk after build: $(df -h / --output=avail | tail -1 | tr -d ' ') available"
           log_group_end
 
           # --- Compile luci-app-passwall ---
