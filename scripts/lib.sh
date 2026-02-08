@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+# ── Cleanup trap ────────────────────────────────────────────────────────────
+cleanup() {
+  rm -f /tmp/build-*.log 2>/dev/null || true
+}
+trap cleanup EXIT
+
 # ── Logging ─────────────────────────────────────────────────────────────────
 
 _ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
@@ -34,34 +40,50 @@ retry() {
     fi
     log_warning "Attempt $attempt failed, retrying in ${delay}s…"
     sleep "$delay"
+    attempt=$(( attempt + 1 ))
     delay=$(( delay * 2 ))
     [ "$delay" -gt "$max_delay" ] && delay=$max_delay
-    attempt=$(( attempt + 1 ))
   done
+  return 1
 }
 
 # ── Make helper: parallel first, then single-threaded fallback ──────────────
-# Usage: make_with_retry <target> [label]
+# Usage: make_with_retry <target> [label] [timeout_minutes]
 make_with_retry() {
-  local target="$1" label="${2:-$1}"
+  local target="$1" label="${2:-$1}" timeout_min="${3:-60}"
   local nproc; nproc=$(nproc)
-  local log="/tmp/build-${label//\//_}.log"
+  local log="/tmp/build-${label//\//_}-$$.log"
   local t0; t0=$(date +%s)
+  local timeout_sec=$((timeout_min * 60))
 
-  if make "$target" -j"$nproc" V=s 2>&1 | tee "$log"; then
+  log_info "Building $label (timeout: ${timeout_min}m, parallel jobs: $nproc)"
+
+  if timeout "$timeout_sec" make "$target" -j"$nproc" V=s 2>&1 | tee "$log"; then
     log_info "Built $label (parallel, $(( $(date +%s) - t0 ))s)"
     rm -f "$log"; return 0
+  fi
+
+  local exit_code=$?
+  if [ "$exit_code" -eq 124 ]; then
+    log_error "Build timeout after ${timeout_min}m: $label"
+    tail -50 "$log" 2>/dev/null || true
+    rm -f "$log"; return 1
   fi
 
   log_warning "Parallel build failed for $label, retrying single-threaded…"
   tail -30 "$log" 2>/dev/null || true
 
-  if make "$target" V=s 2>&1 | tee "$log"; then
+  if timeout "$timeout_sec" make "$target" V=s 2>&1 | tee "$log"; then
     log_info "Built $label (single-threaded, $(( $(date +%s) - t0 ))s)"
     rm -f "$log"; return 0
   fi
 
-  log_error "Build failed: $label ($(( $(date +%s) - t0 ))s)"
+  exit_code=$?
+  if [ "$exit_code" -eq 124 ]; then
+    log_error "Build timeout after ${timeout_min}m (single-threaded): $label"
+  else
+    log_error "Build failed: $label ($(( $(date +%s) - t0 ))s)"
+  fi
   tail -50 "$log" 2>/dev/null || true
   rm -f "$log"; return 1
 }
@@ -90,6 +112,11 @@ extract_version() {
 # ── Append to $GITHUB_ENV (no-op outside Actions) ──────────────────────────
 gh_env() {
   local line="$1"
+  # Validate format: KEY=VALUE
+  if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
+    log_warning "Skipping malformed environment variable: $line"
+    return 1
+  fi
   export "${line?}"
   [ -n "${GITHUB_ENV:-}" ] && echo "$line" >> "$GITHUB_ENV"
 }
