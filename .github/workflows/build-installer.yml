@@ -65,6 +65,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-sdk-
 
       - name: Cache Go modules
+        id: cache-go
         uses: actions/cache@v4
         with:
           path: openwrt-sdk/dl/go-mod-cache
@@ -72,6 +73,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-go-
 
       - name: Cache Rust/Cargo
+        id: cache-rust
         uses: actions/cache@v4
         with:
           path: |
@@ -94,6 +96,39 @@ jobs:
             ${{ env.CACHE_VERSION }}-feeds-
 
       # ── Build pipeline ──────────────────────────────────────────────────
+      - name: Cache diagnostics
+        run: |
+          source "$GITHUB_WORKSPACE/scripts/lib.sh"
+          group_start "Cache Status Report"
+          echo "SDK cache hit: ${{ steps.cache-sdk.outputs.cache-hit }}"
+          echo "Go cache hit: ${{ steps.cache-go.outputs.cache-hit || 'N/A' }}"
+          echo "Rust cache hit: ${{ steps.cache-rust.outputs.cache-hit || 'N/A' }}"
+          echo "Feeds cache hit: ${{ steps.cache-feeds.outputs.cache-hit }}"
+          if [ "${{ steps.cache-sdk.outputs.cache-hit }}" = "true" ]; then
+            log_info "SDK cache restored - will validate and clean stale artifacts"
+          else
+            log_info "SDK cache miss - will download fresh SDK"
+          fi
+          if [ "${{ steps.cache-feeds.outputs.cache-hit }}" = "true" ]; then
+            log_info "Feeds cache restored - will validate integrity"
+          else
+            log_info "Feeds cache miss - will perform full feed update"
+          fi
+          {
+            echo "## Cache Diagnostics"
+            echo "| Cache Type | Status | Action |"
+            echo "|------------|--------|--------|"
+            echo "| SDK | ${{ steps.cache-sdk.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | ${{ steps.cache-sdk.outputs.cache-hit == 'true' && 'Validate & clean artifacts' || 'Fresh download' }} |"
+            echo "| Feeds | ${{ steps.cache-feeds.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | ${{ steps.cache-feeds.outputs.cache-hit == 'true' && 'Validate integrity' || 'Full update' }} |"
+            echo "| Go modules | ${{ steps.cache-go.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | Incremental |"
+            echo "| Rust/Cargo | ${{ steps.cache-rust.outputs.cache-hit == 'true' && '✓ Hit' || '✗ Miss' }} | Incremental |"
+            echo ""
+            echo "**Cache Version**: \`${{ env.CACHE_VERSION }}\`"
+            echo ""
+            echo "> **Troubleshooting**: If experiencing cache-related build issues, increment CACHE_VERSION to invalidate all caches."
+          } >> "$GITHUB_STEP_SUMMARY"
+          group_end
+
       - name: Prepare build environment
         run: scripts/setup-environment.sh
 

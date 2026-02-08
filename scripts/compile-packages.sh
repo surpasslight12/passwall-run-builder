@@ -159,7 +159,13 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     if [ -n "$TOTAL_FAILED_LIST" ]; then
       echo "### Failed Packages"
       for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
+      echo ""
+      echo "**Note**: If build failures persist, try incrementing CACHE_VERSION in workflow to clear caches."
     fi
+    echo "### Build Artifact Safety"
+    echo "- Stale cached APK artifacts are removed before each package build"
+    echo "- Only fresh artifacts (modified within ${ARTIFACT_FRESHNESS_MINUTES}min) are counted as successful"
+    echo "- This prevents cached artifacts from masking real build failures"
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 

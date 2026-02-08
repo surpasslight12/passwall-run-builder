@@ -22,10 +22,23 @@ EOF
 fi
 log_info "feeds.conf:"; cat feeds.conf
 
-if [ "$FEEDS_CACHED" = "true" ] && [ -d feeds/packages ] && [ -d feeds/luci ]; then
-  log_info "Using cached feeds, running index update only"
+# Validate cached feeds to ensure they're not corrupted
+validate_feeds_cache() {
+  [ -d feeds/packages ] || return 1
+  [ -d feeds/luci ] || return 1
+  [ -f feeds/packages.index ] || return 1
+  [ -f feeds/luci.index ] || return 1
+  # Check that feeds have actual content
+  [ -d feeds/packages/lang ] || return 1
+  [ -d feeds/luci/applications ] || return 1
+  return 0
+}
+
+if [ "$FEEDS_CACHED" = "true" ] && validate_feeds_cache; then
+  log_info "Cached feeds validated, running index update only"
   ./scripts/feeds update -i
 else
+  [ "$FEEDS_CACHED" = "true" ] && log_warning "Cached feeds validation failed, performing full update"
   log_info "Updating feeds…"
   if ! retry 3 30 120 "Update feeds" "./scripts/feeds update -a"; then
     log_warning "Feed update failed, falling back to GitHub mirrors…"
@@ -193,4 +206,17 @@ done
 
 [ "$ERRORS" -gt 0 ] && { log_error "Validation failed ($ERRORS errors)"; exit 1; }
 log_info "Build environment validated"
+
+# Report cache usage status for diagnostics
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "### Cache Status"
+    if [ "$FEEDS_CACHED" = "true" ] && validate_feeds_cache; then
+      echo "- **Feeds**: ✓ Using validated cache"
+    else
+      echo "- **Feeds**: ⚠ Cache not used or validation failed (fresh download)"
+    fi
+    echo "- **Config files**: Cleaned before defconfig to prevent stale state"
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
 group_end

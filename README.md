@@ -51,11 +51,26 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 工作流使用 GitHub Actions Cache 来加速构建：
 
 - **SDK 缓存**：根据 SDK URL 哈希缓存整个 SDK 目录
+  - 自动清理缓存中的 bin/packages/ 构建产物，防止旧构建掩盖新错误
+  - 自动清理 .config 和 tmp/ 配置文件，避免配置冲突
 - **Go 缓存**：缓存 SDK 的 Go 模块下载缓存（`openwrt-sdk/dl/go-mod-cache`）
 - **Rust 缓存**：缓存 Cargo 注册表和 rustup
 - **Feeds 缓存**：缓存 OpenWrt feeds 目录
+  - 自动验证缓存完整性，如验证失败则重新下载
 
 缓存按周更新，如需强制刷新可修改 `CACHE_VERSION` 环境变量。
+
+#### 缓存健康检查 | Cache Health Checks
+
+构建系统包含多项缓存验证机制：
+
+1. **SDK 验证**：检查关键文件和目录，确保 SDK 完整
+2. **Feeds 验证**：检查 feeds 索引和内容，防止损坏
+3. **构建产物清理**：每次构建前删除旧的 APK 文件
+4. **配置文件清理**：清除可能导致冲突的配置文件
+5. **新鲜度检测**：只接受 5 分钟内修改的构建产物，避免使用缓存掩盖失败
+
+查看 GitHub Actions 的 "Cache Diagnostics" 和 "Build Summary" 了解缓存使用情况。
 
 ## 系统要求 | Requirements
 
@@ -69,6 +84,9 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 - **部分包编译失败**：查看 Actions 日志，失败包会被跳过。
 - **旧版 OpenWrt**：24.10 及更早版本需使用旧版脚本或自行修改。
 - **缓存问题**：如遇缓存导致的构建问题，可增加 `CACHE_VERSION` 值来清除缓存。
+  - 构建系统会自动验证缓存完整性并清理潜在冲突
+  - 查看 GitHub Actions "Cache Diagnostics" 了解缓存状态
+  - 如果构建失败且怀疑是缓存问题，将 `.github/workflows/build-installer.yml` 中的 `CACHE_VERSION: v1` 改为 `v2`
 
 ## 项目结构 | Structure
 
