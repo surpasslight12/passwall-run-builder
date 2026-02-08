@@ -37,7 +37,7 @@ handle_error() {
 }
 
 if ! trap 'handle_error $?' ERR 2>/dev/null; then
-	trap 'handle_error $?' EXIT
+	trap 'rc=$?; [ "$rc" -ne 0 ] && handle_error "$rc"' EXIT
 fi
 
 log_info "Starting PassWall installation..."
