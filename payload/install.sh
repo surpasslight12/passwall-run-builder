@@ -30,9 +30,7 @@ handle_error() {
 	exit $exit_code
 }
 
-if ! trap 'LAST_EXIT_CODE=$?; handle_error' ERR 2>/dev/null; then
-	trap 'LAST_EXIT_CODE=$?; [ "$LAST_EXIT_CODE" -ne 0 ] && handle_error' EXIT
-fi
+trap 'LAST_EXIT_CODE=$?; [ "$LAST_EXIT_CODE" -ne 0 ] && handle_error' EXIT
 
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
