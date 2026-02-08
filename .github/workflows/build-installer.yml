@@ -750,6 +750,9 @@ jobs:
           # --- Configure build options ---
           log_group_start "Configuring build options"
 
+          log_info "Resetting previous .config to avoid stale settings..."
+          rm -f .config .config.old tmp/.config-* tmp/.config.in 2>/dev/null || true
+
           log_info "Running initial defconfig..."
           make defconfig < /dev/null
 
@@ -847,22 +850,12 @@ jobs:
           # PassWall dependencies during compilation)
           unset CI
 
-          # --- Compile luci-app-passwall ---
-          log_group_start "Compiling luci-app-passwall"
-
-          log_info "Starting build with $(nproc) parallel jobs..."
-          log_info "Disk space before build:"
-          df -h / | tail -1
-
-          if ! make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall"; then
-            log_error "Failed to compile luci-app-passwall"
-            exit 1
-          fi
-
-          log_group_end
-
-          # --- Compile dependency packages ---
+          # --- Compile dependency packages first ---
           log_group_start "Building PassWall dependency packages"
+
+          log_info "Starting dependency builds with $(nproc) parallel jobs..."
+          log_info "Disk space before dependency build:"
+          df -h / | tail -1
 
           PASSWALL_DEPS="chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy \
             shadow-tls shadowsocks-libev shadowsocks-rust shadowsocksr-libev simple-obfs sing-box tcping \
@@ -937,8 +930,18 @@ jobs:
           log_info "Checking built packages:"
           find bin/packages -name "*.apk" -type f | head -20 || log_warning "No .apk files found"
 
-          log_info "Disk space after compilation:"
+          log_info "Disk space after dependency compilation:"
           df -h / | tail -1
+
+          log_group_end
+
+          # --- Compile luci-app-passwall (after dependencies) ---
+          log_group_start "Compiling luci-app-passwall"
+
+          if ! make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall"; then
+            log_error "Failed to compile luci-app-passwall"
+            exit 1
+          fi
 
           log_group_end
 
