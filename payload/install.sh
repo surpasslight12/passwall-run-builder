@@ -24,8 +24,14 @@ log_success() {
 
 # Error handler
 handle_error() {
-	local exit_code=$?
-	local line_number=$1
+	local exit_code=$1
+	local line_number=$2
+	if [ -z "$exit_code" ]; then
+		exit_code=$?
+	fi
+	if [ -z "$line_number" ]; then
+		line_number=$LINENO
+	fi
 	if [ "$exit_code" -eq 0 ]; then
 		return
 	fi
@@ -34,8 +40,8 @@ handle_error() {
 	exit $exit_code
 }
 
-if ! trap 'handle_error $LINENO' ERR 2>/dev/null; then
-	trap 'handle_error $LINENO' EXIT
+if ! trap 'handle_error $? $LINENO' ERR 2>/dev/null; then
+	trap 'handle_error $? $LINENO' EXIT
 fi
 
 log_info "Starting PassWall installation..."
