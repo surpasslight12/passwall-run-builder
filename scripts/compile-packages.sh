@@ -38,14 +38,34 @@ package_artifacts_exist() {
   find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
 }
 
+# Check if artifacts were built in this session (modified in last 5 minutes)
+package_artifacts_fresh() {
+  local pkg="$1"
+  [ -d bin/packages ] || return 1
+  find bin/packages -type f -mmin -5 \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
+}
+
+check_disk_space() {
+  local min_gb="${1:-10}"
+  local avail_kb; avail_kb=$(df / --output=avail | tail -1 | tr -d ' ')
+  local avail_gb=$((avail_kb / 1024 / 1024))
+  if [ "$avail_gb" -lt "$min_gb" ]; then
+    log_error "Insufficient disk space: ${avail_gb}GB (need ${min_gb}GB)"
+    return 1
+  fi
+  log_info "Available disk space: ${avail_gb}GB"
+  return 0
+}
+
 TOTAL_BUILT=0 TOTAL_FAILED=0 TOTAL_FAILED_LIST=""
-GROUP_LABELS=() GROUP_BUILT=() GROUP_FAILED=()
+GROUP_LABELS=() GROUP_BUILT=() GROUP_FAILED=() GROUP_TIMES=()
 
 # build_group <group_label> <pkg1> <pkg2> …
 build_group() {
   local label="$1"; shift
   local pkgs=("$@")
   local built=0 failed=0 failed_list=""
+  local group_start_time; group_start_time=$(date +%s)
 
   group_start "Building $label packages"
   log_info "Packages ($label): ${pkgs[*]}"
@@ -65,11 +85,18 @@ build_group() {
     # genuinely new output from the current build, not leftovers from the
     # SDK cache that mask real compilation failures.
     find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -delete 2>/dev/null || true
+    sync  # Ensure filesystem flushes deletes before checking artifacts
 
     if make_with_retry "$PKG_PATH/compile" "$pkg"; then
-      built=$((built + 1))
+      if package_artifacts_fresh "$pkg"; then
+        log_info "Successfully built fresh artifacts for $pkg"
+        built=$((built + 1))
+      else
+        log_warning "Build succeeded but no fresh artifacts for $pkg (using cached?)"
+        built=$((built + 1))
+      fi
     elif package_artifacts_exist "$pkg"; then
-      log_info "Build returned error for $pkg but cached artifacts found"
+      log_warning "Build returned error for $pkg but cached artifacts found"
       built=$((built + 1))
     else
       log_warning "Failed to compile ($label): $pkg (skipping)"
@@ -79,21 +106,32 @@ build_group() {
 
   log_info "$label summary: $built succeeded, $failed failed"
   [ -n "$failed_list" ] && log_warning "$label failed:$failed_list"
+  
+  local group_duration=$(($(date +%s) - group_start_time))
+  log_info "$label completed in ${group_duration}s"
   group_end
 
   TOTAL_BUILT=$((TOTAL_BUILT + built))
   TOTAL_FAILED=$((TOTAL_FAILED + failed))
   TOTAL_FAILED_LIST="$TOTAL_FAILED_LIST$failed_list"
-  GROUP_LABELS+=("$label"); GROUP_BUILT+=("$built"); GROUP_FAILED+=("$failed")
+  GROUP_LABELS+=("$label"); GROUP_BUILT+=("$built"); GROUP_FAILED+=("$failed"); GROUP_TIMES+=("$group_duration")
 }
 
 # ── Compile dependencies ────────────────────────────────────────────────────
 log_info "Parallel jobs: $(nproc)"
 log_info "Disk before build: $(df -h / --output=avail | tail -1 | tr -d ' ')"
 
+check_disk_space 10 || { log_error "Insufficient disk space to continue"; exit 1; }
+
 build_group "C/C++"    "${C_PACKAGES[@]}"
+check_disk_space 5 || log_warning "Low disk space after C/C++ builds"
+
 build_group "Go"       "${GO_PACKAGES[@]}"
+check_disk_space 5 || log_warning "Low disk space after Go builds"
+
 build_group "Rust"     "${RUST_PACKAGES[@]}"
+check_disk_space 5 || log_warning "Low disk space after Rust builds"
+
 build_group "Prebuilt" "${PREBUILT_PACKAGES[@]}"
 
 log_info "Overall summary: $TOTAL_BUILT succeeded, $TOTAL_FAILED failed"
@@ -102,12 +140,16 @@ log_info "Overall summary: $TOTAL_BUILT succeeded, $TOTAL_FAILED failed"
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "## PassWall Dependency Build Summary"
-    echo "| Group | Built | Failed |"
-    echo "|-------|-------|--------|"
+    echo "| Group | Built | Failed | Time |"
+    echo "|-------|-------|--------|------|"
     for i in "${!GROUP_LABELS[@]}"; do
-      echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} |"
+      local time_str="${GROUP_TIMES[$i]}s"
+      if [ "${GROUP_TIMES[$i]}" -ge 60 ]; then
+        time_str="$((GROUP_TIMES[$i] / 60))m $((GROUP_TIMES[$i] % 60))s"
+      fi
+      echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $time_str |"
     done
-    echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** |"
+    echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | - |"
     if [ -n "$TOTAL_FAILED_LIST" ]; then
       echo "### Failed Packages"
       for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
