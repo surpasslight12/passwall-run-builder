@@ -34,7 +34,9 @@ handle_error() {
 	exit $exit_code
 }
 
-trap 'handle_error $LINENO' EXIT
+if ! trap 'handle_error $LINENO' ERR 2>/dev/null; then
+	trap 'handle_error $LINENO' EXIT
+fi
 
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
