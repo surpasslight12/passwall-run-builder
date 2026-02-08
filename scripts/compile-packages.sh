@@ -58,6 +58,11 @@ build_group() {
       failed=$((failed + 1)); failed_list="$failed_list $pkg"; continue
     fi
 
+    # Remove stale cached artifacts so package_artifacts_exist only finds
+    # genuinely new output from the current build, not leftovers from the
+    # SDK cache that mask real compilation failures.
+    find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -delete 2>/dev/null || true
+
     if make_with_retry "$PKG_PATH/compile" "$pkg"; then
       built=$((built + 1))
     elif package_artifacts_exist "$pkg"; then
