@@ -227,6 +227,7 @@ jobs:
             # Validate KEY=VALUE format
             if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
               echo "$line" >> "$GITHUB_ENV"
+              export "$line"
               log_debug "Loaded config: $line"
             else
               log_warning "Skipping invalid config line: $line"
@@ -238,23 +239,22 @@ jobs:
           if [ -n "$SDK_URL_OVERRIDE" ]; then
             log_info "Using SDK URL override from workflow input"
             echo "OPENWRT_SDK_URL=$SDK_URL_OVERRIDE" >> "$GITHUB_ENV"
-            SDK_URL="$SDK_URL_OVERRIDE"
+            export OPENWRT_SDK_URL="$SDK_URL_OVERRIDE"
           else
-            # Validate required OPENWRT_SDK_URL is set in config
-            SDK_URL=$(grep -E '^OPENWRT_SDK_URL=' "$CONFIG_FILE" | head -1 | cut -d'=' -f2-)
-            if [ -z "$SDK_URL" ]; then
+            # Validate required OPENWRT_SDK_URL is set in config (already exported above)
+            if [ -z "${OPENWRT_SDK_URL:-}" ]; then
               log_error "OPENWRT_SDK_URL is not defined in $CONFIG_FILE"
               exit 1
             fi
           fi
           
-          log_info "SDK URL configured: $SDK_URL"
+          log_info "SDK URL configured: $OPENWRT_SDK_URL"
           log_group_end
           
           log_group_start "Generating cache keys"
           
           # Generate cache key based on SDK URL hash
-          SDK_HASH=$(echo "$SDK_URL" | sha256sum | cut -c1-16)
+          SDK_HASH=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)
           echo "sdk-hash=$SDK_HASH" >> $GITHUB_OUTPUT
           log_info "SDK cache hash: $SDK_HASH"
           
@@ -950,29 +950,7 @@ jobs:
           source "$GITHUB_WORKSPACE/.github-actions-log.sh"
           set -eo pipefail
 
-          # --- Version parser ---
-          extract_version() {
-            local filename="$1"
-            local prefix="$2"
-            filename=$(basename "$filename")
-            local base="${filename%.apk}"
-            if [ -n "$prefix" ]; then
-              base="${base#${prefix}}"
-              base="${base#-}"
-              base="${base#_}"
-            fi
-            # SDK-built APKs in this workflow do not include explicit arch suffixes.
-            if printf "%s" "$base" | grep -q -- '_all$'; then
-              base="${base%_all}"
-            elif printf "%s" "$base" | grep -q -- '-all$'; then
-              base="${base%-all}"
-            elif printf "%s" "$base" | grep -q -- '_[^_]*$'; then
-              base="$(printf "%s" "$base" | sed -E 's/_[^_]+$//')"
-            fi
-            echo "$base"
-          }
-
-          # Save extract_version for the installer build step
+          # --- Version parser (shared with installer build step) ---
           cat > "$GITHUB_WORKSPACE/extract-version.sh" << 'VERSIONEOF'
           extract_version() {
             local filename="$1"
@@ -994,6 +972,8 @@ jobs:
             echo "$base"
           }
           VERSIONEOF
+
+          source "$GITHUB_WORKSPACE/extract-version.sh"
 
           # --- Collect packages ---
           log_group_start "Collecting built packages"
