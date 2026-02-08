@@ -69,6 +69,20 @@ else
 fi
 group_end
 
+# ── Patch Rust llvm.download-ci-llvm (true → if-unchanged) ─────────────────
+# Rust ≥1.90 bootstrap panics when download-ci-llvm is "true" and a CI
+# environment is detected (GITHUB_ACTIONS).  Changing to "if-unchanged" is
+# the recommended upstream fix (rust-lang/rust#141782).
+group_start "Patching Rust download-ci-llvm"
+RUST_MK="feeds/packages/lang/rust/Makefile"
+if [ -f "$RUST_MK" ] && grep -q 'download-ci-llvm=true' "$RUST_MK"; then
+  sed -i 's/download-ci-llvm=true/download-ci-llvm=if-unchanged/g' "$RUST_MK"
+  log_info "Patched download-ci-llvm in $RUST_MK"
+else
+  log_info "Rust download-ci-llvm already patched or not applicable"
+fi
+group_end
+
 # ── Clone PassWall sources ──────────────────────────────────────────────────
 group_start "Setting up PassWall sources"
 
