@@ -517,6 +517,23 @@ jobs:
 
           log_group_end
 
+          # --- Patch curl LDAP dependency to avoid Kconfig recursion ---
+          log_group_start "Patching curl LDAP dependency"
+
+          CURL_MAKEFILE="feeds/packages/net/curl/Makefile"
+          if [ -f "$CURL_MAKEFILE" ]; then
+            if grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MAKEFILE"; then
+              sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MAKEFILE"
+              log_info "Removed LIBCURL_LDAP conditional dependency from libcurl"
+            else
+              log_info "curl LDAP dependency already patched"
+            fi
+          else
+            log_warning "curl Makefile not found, skipping LDAP dependency patch"
+          fi
+
+          log_group_end
+
           # --- Setup PassWall sources ---
           log_group_start "Setting up PassWall sources"
 
