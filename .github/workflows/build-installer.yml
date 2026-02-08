@@ -523,7 +523,7 @@ jobs:
           CURL_MAKEFILE="feeds/packages/net/curl/Makefile"
           if [ -f "$CURL_MAKEFILE" ]; then
             if grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MAKEFILE"; then
-              sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap//' "$CURL_MAKEFILE"
+              sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MAKEFILE"
               log_info "Removed LIBCURL_LDAP conditional dependency from libcurl"
             else
               log_info "curl LDAP dependency already patched"

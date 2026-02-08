@@ -30,7 +30,14 @@ handle_error() {
 	exit $exit_code
 }
 
-trap 'LAST_EXIT_CODE=$?; [ "$LAST_EXIT_CODE" -ne 0 ] && handle_error' EXIT
+on_exit() {
+	LAST_EXIT_CODE=$?
+	if [ "$LAST_EXIT_CODE" -ne 0 ]; then
+		handle_error
+	fi
+}
+
+trap on_exit EXIT
 
 log_info "Starting PassWall installation..."
 log_info "开始安装 PassWall..."
