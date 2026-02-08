@@ -68,7 +68,7 @@ Builds a self-extracting installer based on the upstream project using GitHub Ac
 2. **Feeds 验证**：检查 feeds 索引和内容，防止损坏
 3. **构建产物清理**：每次构建前删除旧的 APK 文件
 4. **配置文件清理**：清除可能导致冲突的配置文件
-5. **新鲜度检测**：只接受 5 分钟内修改的构建产物，避免使用缓存掩盖失败
+5. **新鲜度检测**：只接受近期（默认 5 分钟）内修改的构建产物，避免使用缓存掩盖失败
 
 查看 GitHub Actions 的 "Cache Diagnostics" 和 "Build Summary" 了解缓存使用情况。
 
