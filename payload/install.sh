@@ -25,23 +25,19 @@ log_success() {
 # Error handler
 handle_error() {
 	local exit_code=$1
-	local line_number=$2
 	if [ -z "$exit_code" ]; then
 		exit_code=$?
-	fi
-	if [ -z "$line_number" ]; then
-		line_number=$LINENO
 	fi
 	if [ "$exit_code" -eq 0 ]; then
 		return
 	fi
-	log_error "Script failed at line $line_number with exit code $exit_code"
-	log_error "脚本在第 $line_number 行失败，退出码: $exit_code"
+	log_error "Script failed with exit code $exit_code"
+	log_error "脚本失败，退出码: $exit_code"
 	exit $exit_code
 }
 
-if ! trap 'handle_error $? $LINENO' ERR 2>/dev/null; then
-	trap 'handle_error $? $LINENO' EXIT
+if ! trap 'handle_error $?' ERR 2>/dev/null; then
+	trap 'handle_error $?' EXIT
 fi
 
 log_info "Starting PassWall installation..."
