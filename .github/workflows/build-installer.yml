@@ -29,7 +29,7 @@ jobs:
       - name: Load configuration
         id: config
         run: |
-          source scripts/lib.sh
+          source "$GITHUB_WORKSPACE/scripts/lib.sh"
           CONFIG_FILE="config/openwrt-sdk.conf"
           [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ] \
             || { log_error "Config missing or empty: $CONFIG_FILE"; exit 1; }

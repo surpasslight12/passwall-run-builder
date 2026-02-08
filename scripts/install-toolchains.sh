@@ -33,7 +33,7 @@ if [ "$NEED_GO" = true ]; then
   sudo rm -rf /usr/local/go
   sudo tar -C /usr/local -xzf "/tmp/${TARBALL}"
   rm -f "/tmp/${TARBALL}"
-  echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+  [ -n "${GITHUB_PATH:-}" ] && echo "/usr/local/go/bin" >> "$GITHUB_PATH"
   export PATH="/usr/local/go/bin:$PATH"
   /usr/local/go/bin/go version || { log_error "Go installation verification failed"; exit 1; }
   log_info "Go $GO_VERSION installed"
@@ -46,7 +46,10 @@ group_start "Installing Rust"
 NEED_RUST=true
 if command -v rustc >/dev/null 2>&1; then
   log_info "Rust already installed: $(rustc --version | awk '{print $2}')"
-  [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+  if [ -f "$HOME/.cargo/env" ]; then
+    source "$HOME/.cargo/env"
+    [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+  fi
   if rustup target list --installed | grep -q x86_64-unknown-linux-musl; then
     log_info "musl target already present"; NEED_RUST=false
   else
@@ -59,7 +62,7 @@ if [ "$NEED_RUST" = true ]; then
   retry 3 20 120 "Install rustup" \
     "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
   source "$HOME/.cargo/env"
-  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+  [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
   rustup target add x86_64-unknown-linux-musl
   rustc --version && cargo --version || { log_error "Rust verification failed"; exit 1; }
   log_info "Rust installed"

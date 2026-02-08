@@ -5,7 +5,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 cd openwrt-sdk
 
-PAYLOAD="$GITHUB_WORKSPACE/payload"
+PAYLOAD="${GITHUB_WORKSPACE:-.}/payload"
 DEPENDS="$PAYLOAD/depends"
 mkdir -p "$PAYLOAD" "$DEPENDS"
 

@@ -54,15 +54,17 @@ done
 log_info "Build summary: $BUILT succeeded, $FAILED failed"
 [ -n "$FAILED_LIST" ] && log_warning "Failed:$FAILED_LIST"
 
-{
-  echo "## PassWall Dependency Build Summary"
-  echo "- **Built**: $BUILT packages"
-  echo "- **Failed**: $FAILED packages"
-  if [ -n "$FAILED_LIST" ]; then
-    echo "### Failed Packages"
-    for p in $FAILED_LIST; do echo "- \`$p\`"; done
-  fi
-} >> "$GITHUB_STEP_SUMMARY"
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  {
+    echo "## PassWall Dependency Build Summary"
+    echo "- **Built**: $BUILT packages"
+    echo "- **Failed**: $FAILED packages"
+    if [ -n "$FAILED_LIST" ]; then
+      echo "### Failed Packages"
+      for p in $FAILED_LIST; do echo "- \`$p\`"; done
+    fi
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
 
 log_info "Disk after deps: $(df -h / --output=avail | tail -1 | tr -d ' ')"
 group_end
