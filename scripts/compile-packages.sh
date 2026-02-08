@@ -31,6 +31,11 @@ PREBUILT_PACKAGES=(
   chinadns-ng naiveproxy tuic-client v2ray-geodata
 )
 
+# ── Configuration ───────────────────────────────────────────────────────────
+# Artifact freshness threshold in minutes - artifacts modified within this
+# timeframe are considered "fresh" (newly built in this session)
+ARTIFACT_FRESHNESS_MINUTES=${ARTIFACT_FRESHNESS_MINUTES:-5}
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 package_artifacts_exist() {
   local pkg="$1"
@@ -38,11 +43,12 @@ package_artifacts_exist() {
   find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
 }
 
-# Check if artifacts were built in this session (modified in last 5 minutes)
+# Check if artifacts were built in this session (modified recently)
 package_artifacts_fresh() {
   local pkg="$1"
   [ -d bin/packages ] || return 1
-  find bin/packages -type f -mmin -5 \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
+  find bin/packages -type f -mmin -"$ARTIFACT_FRESHNESS_MINUTES" \
+    \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
 }
 
 check_disk_space() {

@@ -113,7 +113,7 @@ extract_version() {
 gh_env() {
   local line="$1"
   # Validate format: KEY=VALUE
-  if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+  if [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*=.+ ]]; then
     log_warning "Skipping malformed environment variable: $line"
     return 1
   fi
