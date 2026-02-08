@@ -24,17 +24,14 @@ log_success() {
 
 # Error handler
 handle_error() {
-	local exit_code=$1
-	if [ -z "$exit_code" ]; then
-		exit_code=$?
-	fi
+	local exit_code=${LAST_EXIT_CODE:-$?}
 	log_error "Script failed with exit code $exit_code"
 	log_error "脚本失败，退出码: $exit_code"
 	exit $exit_code
 }
 
-if ! trap 'handle_error $?' ERR 2>/dev/null; then
-	trap 'rc=$?; [ "$rc" -ne 0 ] && handle_error "$rc"' EXIT
+if ! trap 'LAST_EXIT_CODE=$?; handle_error' ERR 2>/dev/null; then
+	trap 'LAST_EXIT_CODE=$?; [ "$LAST_EXIT_CODE" -ne 0 ] && handle_error' EXIT
 fi
 
 log_info "Starting PassWall installation..."
