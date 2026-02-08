@@ -8,7 +8,10 @@ source "$SCRIPT_DIR/lib.sh"
 cd openwrt-sdk
 export FORCE_UNSAFE_CONFIGURE=1
 export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
-unset CI
+# Rust 1.90+ bootstrap panics when it detects a CI environment and
+# llvm.download-ci-llvm is set to "true".  GitHub Actions sets both CI and
+# GITHUB_ACTIONS; unsetting them lets the Rust toolchain build normally.
+unset CI GITHUB_ACTIONS
 
 # ── Package groups by toolchain ─────────────────────────────────────────────
 C_PACKAGES=(
