@@ -78,11 +78,13 @@ fi
 group_end
 
 # 3) Rust download-ci-llvm (rust-lang/rust#141782)
+#    'if-unchanged' requires Git-managed sources but SDK uses tarballs;
+#    'true' panics on CI (Rust ≥1.90). Use 'false' to build LLVM from source.
 group_start "Patching Rust download-ci-llvm"
 RUST_MK="feeds/packages/lang/rust/Makefile"
-if [ -f "$RUST_MK" ] && grep -q 'download-ci-llvm=true' "$RUST_MK"; then
-  sed -i 's/download-ci-llvm=true/download-ci-llvm=if-unchanged/g' "$RUST_MK"
-  log_info "Patched download-ci-llvm in $RUST_MK"
+if [ -f "$RUST_MK" ] && grep -qE 'download-ci-llvm=(true|if-unchanged)' "$RUST_MK"; then
+  sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$RUST_MK"
+  log_info "Patched download-ci-llvm to false in $RUST_MK"
 else
   log_info "Rust download-ci-llvm patch not needed"
 fi
