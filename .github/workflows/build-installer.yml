@@ -56,86 +56,88 @@ jobs:
           echo "passwall-key=$PW_KEY" >> "$GITHUB_OUTPUT"
 
       # ── Caches ──────────────────────────────────────────────────────────
-      - name: Cache OpenWrt SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: openwrt-sdk
-          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.config.outputs.sdk-hash }}
-          restore-keys: ${{ env.CACHE_VERSION }}-sdk-
+      # Temporarily disabled to avoid errors
+      # - name: Cache OpenWrt SDK
+      #   id: cache-sdk
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: openwrt-sdk
+      #     key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.config.outputs.sdk-hash }}
+      #     restore-keys: ${{ env.CACHE_VERSION }}-sdk-
 
-      - name: Cache Go modules
-        id: cache-go
-        uses: actions/cache@v4
-        with:
-          path: openwrt-sdk/dl/go-mod-cache
-          key: ${{ env.CACHE_VERSION }}-go-${{ steps.config.outputs.week-key }}
-          restore-keys: ${{ env.CACHE_VERSION }}-go-
+      # - name: Cache Go modules
+      #   id: cache-go
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: openwrt-sdk/dl/go-mod-cache
+      #     key: ${{ env.CACHE_VERSION }}-go-${{ steps.config.outputs.week-key }}
+      #     restore-keys: ${{ env.CACHE_VERSION }}-go-
 
-      - name: Cache Rust/Cargo
-        id: cache-rust
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.rustup
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.config.outputs.week-key }}
-          restore-keys: ${{ env.CACHE_VERSION }}-rust-
+      # - name: Cache Rust/Cargo
+      #   id: cache-rust
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry
+      #       ~/.cargo/git
+      #       ~/.rustup
+      #     key: ${{ env.CACHE_VERSION }}-rust-${{ steps.config.outputs.week-key }}
+      #     restore-keys: ${{ env.CACHE_VERSION }}-rust-
 
-      - name: Cache OpenWrt feeds
-        id: cache-feeds
-        uses: actions/cache@v4
-        with:
-          path: |
-            openwrt-sdk/feeds
-            openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-${{ steps.config.outputs.passwall-key }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-
-            ${{ env.CACHE_VERSION }}-feeds-
+      # - name: Cache OpenWrt feeds
+      #   id: cache-feeds
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       openwrt-sdk/feeds
+      #       openwrt-sdk/package/feeds
+      #     key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-${{ steps.config.outputs.passwall-key }}
+      #     restore-keys: |
+      #       ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-
+      #       ${{ env.CACHE_VERSION }}-feeds-
 
       # ── Build pipeline ──────────────────────────────────────────────────
-      - name: Cache diagnostics
-        run: |
-          source "$GITHUB_WORKSPACE/scripts/lib.sh"
-          group_start "Cache Status Report"
-          SDK_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
-          GO_HIT="${{ steps.cache-go.outputs.cache-hit }}"
-          RUST_HIT="${{ steps.cache-rust.outputs.cache-hit }}"
-          FEEDS_HIT="${{ steps.cache-feeds.outputs.cache-hit }}"
-          
-          echo "SDK cache hit: ${SDK_HIT:-false}"
-          echo "Go cache hit: ${GO_HIT:-false}"
-          echo "Rust cache hit: ${RUST_HIT:-false}"
-          echo "Feeds cache hit: ${FEEDS_HIT:-false}"
-          
-          if [ "$SDK_HIT" = "true" ]; then
-            log_info "SDK cache restored - will validate and clean stale artifacts"
-          else
-            log_info "SDK cache miss - will download fresh SDK"
-          fi
-          if [ "$FEEDS_HIT" = "true" ]; then
-            log_info "Feeds cache restored - will validate integrity"
-          else
-            log_info "Feeds cache miss - will perform full feed update"
-          fi
-          
-          # Generate summary table
-          {
-            echo "## Cache Diagnostics"
-            echo "| Cache Type | Status | Action |"
-            echo "|------------|--------|--------|"
-            echo "| SDK | $( [ "$SDK_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$SDK_HIT" = "true" ] && echo 'Validate & clean artifacts' || echo 'Fresh download' ) |"
-            echo "| Feeds | $( [ "$FEEDS_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$FEEDS_HIT" = "true" ] && echo 'Validate integrity' || echo 'Full update' ) |"
-            echo "| Go modules | $( [ "$GO_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
-            echo "| Rust/Cargo | $( [ "$RUST_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
-            echo ""
-            echo "**Cache Version**: \`${{ env.CACHE_VERSION }}\`"
-            echo ""
-            echo "> **Troubleshooting**: If experiencing cache-related build issues, increment CACHE_VERSION to invalidate all caches."
-          } >> "$GITHUB_STEP_SUMMARY"
-          group_end
+      # Cache diagnostics temporarily disabled as caching is disabled
+      # - name: Cache diagnostics
+      #   run: |
+      #     source "$GITHUB_WORKSPACE/scripts/lib.sh"
+      #     group_start "Cache Status Report"
+      #     SDK_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
+      #     GO_HIT="${{ steps.cache-go.outputs.cache-hit }}"
+      #     RUST_HIT="${{ steps.cache-rust.outputs.cache-hit }}"
+      #     FEEDS_HIT="${{ steps.cache-feeds.outputs.cache-hit }}"
+      #     
+      #     echo "SDK cache hit: ${SDK_HIT:-false}"
+      #     echo "Go cache hit: ${GO_HIT:-false}"
+      #     echo "Rust cache hit: ${RUST_HIT:-false}"
+      #     echo "Feeds cache hit: ${FEEDS_HIT:-false}"
+      #     
+      #     if [ "$SDK_HIT" = "true" ]; then
+      #       log_info "SDK cache restored - will validate and clean stale artifacts"
+      #     else
+      #       log_info "SDK cache miss - will download fresh SDK"
+      #     fi
+      #     if [ "$FEEDS_HIT" = "true" ]; then
+      #       log_info "Feeds cache restored - will validate integrity"
+      #     else
+      #       log_info "Feeds cache miss - will perform full feed update"
+      #     fi
+      #     
+      #     # Generate summary table
+      #     {
+      #       echo "## Cache Diagnostics"
+      #       echo "| Cache Type | Status | Action |"
+      #       echo "|------------|--------|--------|"
+      #       echo "| SDK | $( [ "$SDK_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$SDK_HIT" = "true" ] && echo 'Validate & clean artifacts' || echo 'Fresh download' ) |"
+      #       echo "| Feeds | $( [ "$FEEDS_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | $( [ "$FEEDS_HIT" = "true" ] && echo 'Validate integrity' || echo 'Full update' ) |"
+      #       echo "| Go modules | $( [ "$GO_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
+      #       echo "| Rust/Cargo | $( [ "$RUST_HIT" = "true" ] && echo '✓ Hit' || echo '✗ Miss' ) | Incremental |"
+      #       echo ""
+      #       echo "**Cache Version**: \`${{ env.CACHE_VERSION }}\`"
+      #       echo ""
+      #       echo "> **Troubleshooting**: If experiencing cache-related build issues, increment CACHE_VERSION to invalidate all caches."
+      #     } >> "$GITHUB_STEP_SUMMARY"
+      #     group_end
 
       - name: Prepare build environment
         run: scripts/setup-environment.sh
@@ -144,10 +146,10 @@ jobs:
         run: scripts/install-toolchains.sh
 
       - name: Setup OpenWrt SDK
-        run: scripts/setup-sdk.sh "${{ steps.cache-sdk.outputs.cache-hit }}"
+        run: scripts/setup-sdk.sh "false"
 
       - name: Configure SDK and feeds
-        run: scripts/configure-feeds.sh "${{ steps.cache-feeds.outputs.cache-hit }}"
+        run: scripts/configure-feeds.sh "false"
 
       - name: Compile PassWall packages
         run: scripts/compile-packages.sh
