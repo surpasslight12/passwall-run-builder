@@ -156,7 +156,7 @@ if [ "$TOTAL_FAILED" -gt "$MAX_ALLOWED_FAILURES" ]; then
   die "Too many package failures: $TOTAL_FAILED (max allowed: $MAX_ALLOWED_FAILURES)"
 fi
 if [ "$TOTAL_BUILT" -lt "$MIN_REQUIRED_PACKAGES" ]; then
-  log_warning "Only $TOTAL_BUILT packages built (recommended minimum: $MIN_REQUIRED_PACKAGES)"
+  log_warning "Only $TOTAL_BUILT packages built (minimum required: $MIN_REQUIRED_PACKAGES)"
   # 继续尝试编译主包，collect-packages.sh 会进行最终验证
   # Continue to try compiling main package; collect-packages.sh will do final validation
 fi
