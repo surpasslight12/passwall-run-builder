@@ -13,6 +13,8 @@ log_error()   { echo "[$(_ts)] [ERROR]   $*" >&2; }
 log_success() { echo "[$(_ts)] [OK]      $*"; }
 
 # ── 错误处理 / Error handler ───────────────────────────────────────────────
+# ERR trap is not available in all POSIX shells (e.g. ash/dash on OpenWrt).
+# Fall back to EXIT trap that checks the exit code manually.
 handle_error() {
   log_error "Script failed (exit $1) / 脚本失败（退出码 $1）"
   exit "$1"

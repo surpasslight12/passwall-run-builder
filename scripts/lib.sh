@@ -44,7 +44,7 @@ retry() {
     log_warning "Attempt $attempt failed, retrying in ${delay}s…"
     sleep "$delay"
     attempt=$((attempt + 1))
-    delay=$((delay * 2 > max_delay ? max_delay : delay * 2))
+    delay=$((delay * 2)); [ "$delay" -gt "$max_delay" ] && delay=$max_delay
   done
   return 1
 }
@@ -131,6 +131,7 @@ gh_output() {
 }
 
 # ── Step summary 追加 / Append to GitHub step summary ───────────────────────
+# Usage: gh_summary "markdown text"
 gh_summary() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_STEP_SUMMARY"
 }

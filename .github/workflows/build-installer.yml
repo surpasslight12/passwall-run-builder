@@ -152,7 +152,10 @@ jobs:
             echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'N/A')"
             echo "- **Disk**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
             echo "- **SDK URL**: \`${OPENWRT_SDK_URL:-not set}\`"
-            echo "- **Cache**: SDK=${{ steps.cache-sdk.outputs.cache-hit || 'disabled' }} Feeds=${{ steps.cache-feeds.outputs.cache-hit || 'disabled' }} Go=${{ steps.cache-go.outputs.cache-hit || 'disabled' }} Rust=${{ steps.cache-rust.outputs.cache-hit || 'disabled' }}"
+            echo "- **Cache**: SDK=${{ steps.cache-sdk.outputs.cache-hit || 'off' }}"
+            echo "  Feeds=${{ steps.cache-feeds.outputs.cache-hit || 'off' }}"
+            echo "  Go=${{ steps.cache-go.outputs.cache-hit || 'off' }}"
+            echo "  Rust=${{ steps.cache-rust.outputs.cache-hit || 'off' }}"
             if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
               echo "- **Installer**: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
             else

@@ -114,21 +114,20 @@ log_info "Total: $TOTAL_BUILT built, $TOTAL_FAILED failed"
 
 # 写入 GitHub Step Summary / Write step summary
 write_summary() {
-  local lines=""
-  lines+="## PassWall Build Summary\n"
-  lines+="| Group | Built | Failed | Time |\n"
-  lines+="|-------|-------|--------|------|\n"
+  echo "## PassWall Build Summary"
+  echo "| Group | Built | Failed | Time |"
+  echo "|-------|-------|--------|------|"
   for i in "${!GROUP_LABELS[@]}"; do
     local t="${GROUP_TIMES[$i]}"
     local ts="${t}s"; [ "$t" -ge 60 ] && ts="$((t / 60))m $((t % 60))s"
-    lines+="| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $ts |\n"
+    echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $ts |"
   done
-  lines+="| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | — |\n"
+  echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | — |"
   if [ -n "$TOTAL_FAILED_LIST" ]; then
-    lines+="\n### Failed Packages\n"
-    for p in $TOTAL_FAILED_LIST; do lines+="- \`$p\`\n"; done
+    echo ""
+    echo "### Failed Packages"
+    for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
   fi
-  printf '%b' "$lines"
 }
 
 [ -n "${GITHUB_STEP_SUMMARY:-}" ] && write_summary >> "$GITHUB_STEP_SUMMARY"

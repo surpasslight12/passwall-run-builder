@@ -150,7 +150,12 @@ if [ -f "$PACKAGES_CONF" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     [[ -z "${line// }" ]] && continue
-    echo "CONFIG_PACKAGE_${line}=m" >> .config
+    # 验证包名格式 / Validate package name format
+    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+      echo "CONFIG_PACKAGE_${line}=m" >> .config
+    else
+      log_warning "Skipping invalid package name: $line"
+    fi
   done < "$PACKAGES_CONF"
 else
   log_warning "packages.conf not found, using built-in defaults"
