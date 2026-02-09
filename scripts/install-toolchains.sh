@@ -1,29 +1,30 @@
 #!/usr/bin/env bash
-# Install / upgrade Go and Rust toolchains.
+# ─────────────────────────────────────────────────────────────────────────────
+# install-toolchains.sh — 安装或更新 Go 和 Rust 工具链
+# install-toolchains.sh — Install / upgrade Go and Rust toolchains
+# ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 # ── Go ──────────────────────────────────────────────────────────────────────
 group_start "Installing Go"
 
-log_info "Fetching latest Go version from go.dev…"
 GO_VERSION=""
 fetch_go_version() {
   GO_VERSION=$(curl -sf https://go.dev/VERSION?m=text 2>/dev/null | head -1 | sed 's/go//')
   [ -n "$GO_VERSION" ]
 }
-if ! retry 3 10 60 "Fetch Go version" fetch_go_version; then
-  log_error "Failed to fetch latest Go version"; exit 1
-fi
-log_info "Latest Go version: $GO_VERSION"
+retry 3 10 60 "Fetch Go version" fetch_go_version \
+  || die "Failed to fetch latest Go version"
+log_info "Latest Go: $GO_VERSION"
 
 NEED_GO=true
 if command -v go >/dev/null 2>&1; then
-  INSTALLED=$(go version | awk '{print $3}' | sed 's/go//')
-  if [ "$INSTALLED" = "$GO_VERSION" ]; then
-    log_info "Go $INSTALLED already up-to-date"; NEED_GO=false
+  CUR=$(go version | awk '{print $3}' | sed 's/go//')
+  if [ "$CUR" = "$GO_VERSION" ]; then
+    log_info "Go $CUR already up-to-date"; NEED_GO=false
   else
-    log_info "Upgrading Go from $INSTALLED → $GO_VERSION"
+    log_info "Upgrading Go: $CUR → $GO_VERSION"
   fi
 fi
 
@@ -35,7 +36,7 @@ if [ "$NEED_GO" = true ]; then
   rm -f "/tmp/${TARBALL}"
   [ -n "${GITHUB_PATH:-}" ] && echo "/usr/local/go/bin" >> "$GITHUB_PATH"
   export PATH="/usr/local/go/bin:$PATH"
-  /usr/local/go/bin/go version || { log_error "Go installation verification failed"; exit 1; }
+  /usr/local/go/bin/go version || die "Go installation verification failed"
   log_info "Go $GO_VERSION installed"
 fi
 group_end
@@ -45,11 +46,9 @@ group_start "Installing Rust"
 
 NEED_RUST=true
 if command -v rustc >/dev/null 2>&1; then
-  log_info "Rust already installed: $(rustc --version | awk '{print $2}')"
-  if [ -f "$HOME/.cargo/env" ]; then
-    source "$HOME/.cargo/env"
-    [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-  fi
+  log_info "Rust installed: $(rustc --version | awk '{print $2}')"
+  [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+  [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
   if rustup target list --installed | grep -q x86_64-unknown-linux-musl; then
     log_info "musl target already present"; NEED_RUST=false
   else
@@ -64,7 +63,7 @@ if [ "$NEED_RUST" = true ]; then
   source "$HOME/.cargo/env"
   [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
   rustup target add x86_64-unknown-linux-musl
-  rustc --version && cargo --version || { log_error "Rust verification failed"; exit 1; }
+  rustc --version && cargo --version || die "Rust verification failed"
   log_info "Rust installed"
 fi
 group_end

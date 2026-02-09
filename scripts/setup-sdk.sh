@@ -1,38 +1,32 @@
 #!/usr/bin/env bash
-# Download (if needed) and prepare the OpenWrt SDK.
+# ─────────────────────────────────────────────────────────────────────────────
+# setup-sdk.sh — 下载或验证 OpenWrt SDK，替换内置 Go
+# setup-sdk.sh — Download / validate OpenWrt SDK and update bundled Go
+# ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 : "${OPENWRT_SDK_URL:?OPENWRT_SDK_URL not set}"
-SDK_CACHE_HIT="${1:-false}"          # "true" when the cache step hit
+SDK_CACHE_HIT="${1:-false}"
 
-# ── Verify / download SDK ───────────────────────────────────────────────────
-# Validate cached SDK thoroughly to detect corruption or incomplete state
+# ── 验证 SDK 缓存完整性 / Validate cached SDK ──────────────────────────────
 validate_sdk_cache() {
-  [ -d openwrt-sdk ] || return 1
-  [ -f openwrt-sdk/scripts/feeds ] || return 1
-  [ -f openwrt-sdk/Makefile ] || return 1
-  [ -d openwrt-sdk/staging_dir ] || return 1
-  # Check for critical build tools
-  [ -f openwrt-sdk/staging_dir/host/bin/xz ] || return 1
-  return 0
+  local required=(openwrt-sdk openwrt-sdk/Makefile openwrt-sdk/scripts/feeds
+                  openwrt-sdk/staging_dir openwrt-sdk/staging_dir/host/bin/xz)
+  for item in "${required[@]}"; do
+    [ -e "$item" ] || return 1
+  done
 }
 
+# ── 下载或使用缓存 / Download or use cache ─────────────────────────────────
 if [ "$SDK_CACHE_HIT" = "true" ] && validate_sdk_cache; then
-  log_info "Cached SDK validated successfully"
-  # Clean stale build artifacts from cache to prevent masking build failures
-  if [ -d openwrt-sdk/bin/packages ]; then
-    log_info "Cleaning cached build artifacts from bin/packages/"
-    rm -rf openwrt-sdk/bin/packages/* 2>/dev/null || true
-    log_info "Cached build artifacts cleaned"
-  fi
-  # Clean stale config files that may cause build issues
-  if [ -f openwrt-sdk/.config ] || [ -d openwrt-sdk/tmp ]; then
-    log_info "Cleaning stale SDK config files"
-    rm -f openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
-    rm -rf openwrt-sdk/tmp/.config-*.in 2>/dev/null || true
-    log_info "Stale config files cleaned"
-  fi
+  log_info "Cached SDK validated"
+  # 清除旧构建产物和配置，防止缓存掩盖编译错误
+  # Clean stale artifacts/config to prevent cache masking build failures
+  rm -rf openwrt-sdk/bin/packages/* 2>/dev/null || true
+  rm -f  openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
+  rm -rf openwrt-sdk/tmp/.config-*.in 2>/dev/null || true
+  log_info "Stale build artifacts and config cleaned"
 else
   [ "$SDK_CACHE_HIT" = "true" ] && log_warning "Cached SDK validation failed, re-downloading"
   group_start "Downloading OpenWrt SDK"
@@ -41,15 +35,14 @@ else
   SDK_FILE=$(basename "$OPENWRT_SDK_URL")
   log_info "Downloading: $SDK_FILE"
   retry 3 30 300 "Download SDK" "wget -q '$OPENWRT_SDK_URL' -O '$SDK_FILE'"
-
-  [ -f "$SDK_FILE" ] || { log_error "SDK download failed"; exit 1; }
-  log_info "SDK downloaded ($(du -h "$SDK_FILE" | cut -f1))"
+  [ -f "$SDK_FILE" ] || die "SDK download failed"
+  log_info "Downloaded ($(du -h "$SDK_FILE" | cut -f1))"
 
   log_info "Extracting SDK…"
   case "$SDK_FILE" in
     *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
     *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
-    *) log_error "Unsupported archive format: $SDK_FILE"; exit 1 ;;
+    *)         die "Unsupported archive: $SDK_FILE" ;;
   esac
   rm -f "$SDK_FILE"
   log_info "SDK extracted"
@@ -57,7 +50,7 @@ else
   group_end
 fi
 
-# ── Replace SDK-bundled Go with system Go ───────────────────────────────────
+# ── 替换 SDK 内置 Go / Replace SDK bundled Go ──────────────────────────────
 group_start "Updating SDK Go toolchain"
 
 SYSTEM_GO=$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go")

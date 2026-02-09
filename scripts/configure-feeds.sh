@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Configure OpenWrt feeds, patch known issues, set up PassWall sources,
-# install feed packages, and generate the build .config.
+# ─────────────────────────────────────────────────────────────────────────────
+# configure-feeds.sh — 配置 feeds、应用补丁、安装 PassWall 源码与依赖
+# configure-feeds.sh — Configure feeds, apply patches, set up PassWall sources
+# ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 cd openwrt-sdk
-
 FEEDS_CACHED="${1:-false}"
 
-# ── Configure feeds ─────────────────────────────────────────────────────────
+# ── 配置 feeds / Configure feeds ───────────────────────────────────────────
 group_start "Configuring feeds"
 
 if [ -f feeds.conf.default ]; then
@@ -22,16 +23,11 @@ EOF
 fi
 log_info "feeds.conf:"; cat feeds.conf
 
-# Validate cached feeds to ensure they're not corrupted
 validate_feeds_cache() {
-  [ -d feeds/packages ] || return 1
-  [ -d feeds/luci ] || return 1
-  [ -f feeds/packages.index ] || return 1
-  [ -f feeds/luci.index ] || return 1
-  # Check that feeds have actual content
-  [ -d feeds/packages/lang ] || return 1
-  [ -d feeds/luci/applications ] || return 1
-  return 0
+  local dirs=(feeds/packages feeds/luci feeds/packages/lang feeds/luci/applications)
+  local files=(feeds/packages.index feeds/luci.index)
+  for d in "${dirs[@]}";  do [ -d "$d" ] || return 1; done
+  for f in "${files[@]}"; do [ -f "$f" ] || return 1; done
 }
 
 if [ "$FEEDS_CACHED" = "true" ] && validate_feeds_cache; then
@@ -39,7 +35,6 @@ if [ "$FEEDS_CACHED" = "true" ] && validate_feeds_cache; then
   ./scripts/feeds update -i
 else
   [ "$FEEDS_CACHED" = "true" ] && log_warning "Cached feeds validation failed, performing full update"
-  log_info "Updating feeds…"
   if ! retry 3 30 120 "Update feeds" "./scripts/feeds update -a"; then
     log_warning "Feed update failed, falling back to GitHub mirrors…"
     sed -i \
@@ -49,58 +44,58 @@ else
       -e 's|https://git.openwrt.org/feed/routing.git|https://github.com/openwrt/routing.git|g' \
       -e 's|https://git.openwrt.org/feed/telephony.git|https://github.com/openwrt/telephony.git|g' \
       feeds.conf
-    ./scripts/feeds update -a || { log_error "Failed to update feeds even with GitHub mirrors"; exit 1; }
+    ./scripts/feeds update -a || die "Failed to update feeds even with GitHub mirrors"
   fi
 fi
 group_end
 
-# ── Patch GOTOOLCHAIN (local → auto) ───────────────────────────────────────
+# ── 补丁 / Patches ─────────────────────────────────────────────────────────
+# 1) GOTOOLCHAIN: local → auto
 group_start "Patching GOTOOLCHAIN"
 if [ -d feeds/packages/lang/golang ]; then
   PATCHED=0
   while IFS= read -r f; do
     if grep -q 'GOTOOLCHAIN=local' "$f"; then
       sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "$f"
-      log_info "Patched GOTOOLCHAIN in $f"
       PATCHED=$((PATCHED + 1))
     fi
   done < <(find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) 2>/dev/null)
   log_info "Patched GOTOOLCHAIN in $PATCHED file(s)"
 else
-  log_warning "feeds/packages/lang/golang not found, skipping"
+  log_warning "feeds/packages/lang/golang not found"
 fi
 group_end
 
-# ── Patch curl LDAP dependency (avoid Kconfig recursion) ────────────────────
+# 2) curl LDAP 循环依赖 / curl LDAP dependency loop
 group_start "Patching curl LDAP dependency"
 CURL_MK="feeds/packages/net/curl/Makefile"
 if [ -f "$CURL_MK" ] && grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MK"; then
   sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MK"
-  log_info "Removed LIBCURL_LDAP conditional dependency from libcurl"
+  log_info "Removed LIBCURL_LDAP conditional dependency"
 else
-  log_info "curl LDAP dependency already patched or not applicable"
+  log_info "curl LDAP patch not needed"
 fi
 group_end
 
-# ── Patch Rust llvm.download-ci-llvm (true → if-unchanged) ─────────────────
-# Rust ≥1.90 bootstrap panics when download-ci-llvm is "true" and a CI
-# environment is detected (GITHUB_ACTIONS).  Changing to "if-unchanged" is
-# the recommended upstream fix (rust-lang/rust#141782).
+# 3) Rust download-ci-llvm (rust-lang/rust#141782)
 group_start "Patching Rust download-ci-llvm"
 RUST_MK="feeds/packages/lang/rust/Makefile"
 if [ -f "$RUST_MK" ] && grep -q 'download-ci-llvm=true' "$RUST_MK"; then
   sed -i 's/download-ci-llvm=true/download-ci-llvm=if-unchanged/g' "$RUST_MK"
   log_info "Patched download-ci-llvm in $RUST_MK"
 else
-  log_info "Rust download-ci-llvm already patched or not applicable"
+  log_info "Rust download-ci-llvm patch not needed"
 fi
 group_end
 
-# ── Clone PassWall sources ──────────────────────────────────────────────────
+# ── 克隆 PassWall 源码 / Clone PassWall sources ───────────────────────────
 group_start "Setting up PassWall sources"
 
 log_info "Removing conflicting feed packages…"
-rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
+rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,\
+hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,\
+shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,\
+xray-plugin,geoview,shadow-tls}
 
 rm -rf package/passwall-packages
 retry 3 10 120 "Clone passwall-packages" \
@@ -114,17 +109,16 @@ if [ -n "${PASSWALL_LUCI_REF:-}" ]; then
   log_info "Checking out PASSWALL_LUCI_REF: $PASSWALL_LUCI_REF"
   git -C package/passwall-luci fetch --all --tags
   git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF" \
-    || { log_error "Failed to checkout ref: $PASSWALL_LUCI_REF"; exit 1; }
+    || die "Failed to checkout ref: $PASSWALL_LUCI_REF"
 fi
 group_end
 
-# ── Install feed packages ──────────────────────────────────────────────────
+# ── 安装 feeds 包 / Install feed packages ──────────────────────────────────
 group_start "Installing feed packages"
-
 ./scripts/feeds update -i
 
-log_info "System Go: $(go version 2>/dev/null || echo 'Not found')"
-log_info "System Rust: $(rustc --version 2>/dev/null || echo 'Not found')"
+log_info "Go:   $(go version 2>/dev/null || echo 'N/A')"
+log_info "Rust: $(rustc --version 2>/dev/null || echo 'N/A')"
 
 ./scripts/feeds install \
   libev libmbedtls libsodium libopenssl libpcre2 libudns \
@@ -135,21 +129,37 @@ log_info "System Rust: $(rustc --version 2>/dev/null || echo 'Not found')"
   coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
   libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
   iwinfo openssl libnl-tiny golang rust \
-  || log_warning "Some dependencies may not be available, continuing…"
+  || log_warning "Some feed dependencies may be unavailable, continuing…"
 
 ./scripts/feeds install luci-base || log_warning "luci-base installation had issues"
 ./scripts/feeds install luci-app-passwall \
-  || { log_error "Failed to install luci-app-passwall"; exit 1; }
+  || die "Failed to install luci-app-passwall"
 group_end
 
-# ── Generate build .config ──────────────────────────────────────────────────
-group_start "Configuring build"
+# ── 生成 .config / Generate build config ───────────────────────────────────
+group_start "Generating build config"
 
-rm -f .config .config.old tmp/.config-*.in 2>/dev/null || true
-
+rm -f .config .config.old 2>/dev/null || true
+rm -rf tmp/.config-*.in 2>/dev/null || true
 make defconfig < /dev/null
 
-cat >> .config << 'PKGEOF'
+# 读取包列表配置 / Load package list from config
+PACKAGES_CONF="$SCRIPT_DIR/../config/packages.conf"
+if [ -f "$PACKAGES_CONF" ]; then
+  log_info "Loading package config: $PACKAGES_CONF"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    # 验证包名格式 / Validate package name format
+    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+      echo "CONFIG_PACKAGE_${line}=m" >> .config
+    else
+      log_warning "Skipping invalid package name: $line"
+    fi
+  done < "$PACKAGES_CONF"
+else
+  log_warning "packages.conf not found, using built-in defaults"
+  cat >> .config << 'EOF'
 CONFIG_PACKAGE_chinadns-ng=m
 CONFIG_PACKAGE_dns2socks=m
 CONFIG_PACKAGE_geoview=m
@@ -173,13 +183,14 @@ CONFIG_PACKAGE_v2ray-geosite=m
 CONFIG_PACKAGE_v2ray-plugin=m
 CONFIG_PACKAGE_xray-core=m
 CONFIG_PACKAGE_xray-plugin=m
-PKGEOF
+EOF
+fi
 
 make defconfig < /dev/null
 log_info "Build configured"
 group_end
 
-# ── Validate environment ───────────────────────────────────────────────────
+# ── 验证构建环境 / Validate build environment ──────────────────────────────
 group_start "Validating build environment"
 
 ERRORS=0
@@ -187,36 +198,16 @@ for tool in go rustc cargo make gcc; do
   if command -v "$tool" >/dev/null 2>&1; then
     log_info "$tool: $("$tool" --version 2>&1 | head -1)"
   else
-    log_error "Required tool not found: $tool"; ERRORS=$((ERRORS + 1))
+    log_error "Missing tool: $tool"; ERRORS=$((ERRORS + 1))
   fi
 done
 
-MIN_DISK_GB=10
-AVAIL_KB=$(df / --output=avail | tail -1 | tr -d ' ')
-AVAIL_GB=$((AVAIL_KB / 1024 / 1024))
-if [ "$AVAIL_GB" -lt "$MIN_DISK_GB" ]; then
-  log_error "Insufficient disk: ${AVAIL_GB}GB (need ${MIN_DISK_GB}GB)"; ERRORS=$((ERRORS + 1))
-else
-  log_info "Disk space: ${AVAIL_GB}GB"
-fi
+check_disk_space 10 || ERRORS=$((ERRORS + 1))
 
 for item in scripts/feeds staging_dir Makefile package/passwall-packages package/passwall-luci; do
   [ -e "$item" ] || { log_error "Missing: $item"; ERRORS=$((ERRORS + 1)); }
 done
 
-[ "$ERRORS" -gt 0 ] && { log_error "Validation failed ($ERRORS errors)"; exit 1; }
+[ "$ERRORS" -gt 0 ] && die "Validation failed ($ERRORS errors)"
 log_info "Build environment validated"
-
-# Report cache usage status for diagnostics
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  {
-    echo "### Cache Status"
-    if [ "$FEEDS_CACHED" = "true" ] && validate_feeds_cache; then
-      echo "- **Feeds**: ✓ Using validated cache"
-    else
-      echo "- **Feeds**: ⚠ Cache not used or validation failed (fresh download)"
-    fi
-    echo "- **Config files**: Cleaned before defconfig to prevent stale state"
-  } >> "$GITHUB_STEP_SUMMARY"
-fi
 group_end

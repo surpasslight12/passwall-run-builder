@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Collect built APKs into the payload directory and validate the results.
+# ─────────────────────────────────────────────────────────────────────────────
+# collect-packages.sh — 收集构建产物到 payload 目录并校验
+# collect-packages.sh — Collect built APKs into payload and validate
+# ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
@@ -9,7 +12,7 @@ PAYLOAD="${GITHUB_WORKSPACE:-.}/payload"
 DEPENDS="$PAYLOAD/depends"
 mkdir -p "$PAYLOAD" "$DEPENDS"
 
-# ── Helper: pick the latest-version APK for a package prefix ────────────────
+# ── 选取最新版本 APK / Pick latest-version APK for a prefix ────────────────
 select_latest_pkg() {
   local prefix="$1" dest="$2"
   local best_file="" best_ver=""
@@ -25,14 +28,16 @@ select_latest_pkg() {
   log_info "Collected $prefix: $(basename "$best_file")"
 }
 
-# ── Collect main package ────────────────────────────────────────────────────
+# ── 收集主包 / Collect main package ────────────────────────────────────────
 group_start "Collecting packages"
 
-find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) -exec cp {} "$PAYLOAD/" \;
+find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) \
+  -exec cp {} "$PAYLOAD/" \;
+
 select_latest_pkg "luci-i18n-passwall-zh-cn" "$PAYLOAD" \
   || log_info "Chinese i18n package not found (non-critical)"
 
-# ── Collect dependencies ────────────────────────────────────────────────────
+# ── 收集依赖包 / Collect dependencies ──────────────────────────────────────
 DEP_PREFIXES=(
   chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy
   shadow-tls
@@ -64,25 +69,24 @@ log_info "Collected $COLLECTED dependency packages"
 [ -n "$MISSING" ] && log_warning "Missing:$MISSING"
 group_end
 
-# ── Validate ────────────────────────────────────────────────────────────────
-group_start "Validating packages"
+# ── 校验 / Validate ───────────────────────────────────────────────────────
+group_start "Validating payload"
 
 DEP_COUNT=$(find "$DEPENDS" -name "*.apk" | wc -l)
-[ "$DEP_COUNT" -eq 0 ] && { log_error "No dependency APKs found"; exit 1; }
+[ "$DEP_COUNT" -eq 0 ] && die "No dependency APKs found"
 [ "$DEP_COUNT" -lt 10 ] && log_warning "Only $DEP_COUNT packages (expected ≥10)"
-log_info "Found $DEP_COUNT dependency packages"
+log_info "$DEP_COUNT dependency packages collected"
 
 log_info "Main packages:"
-find "$PAYLOAD" -maxdepth 1 -name "*.apk" | xargs -r -n1 basename | sort | sed 's/^/  - /'
-
-log_info "Dependencies ($DEP_COUNT):"
+find "$PAYLOAD" -maxdepth 1 -name "*.apk" -exec basename {} \; | sort | sed 's/^/  - /'
+log_info "Dependencies:"
 ls -1 "$DEPENDS" | sort | sed 's/^/  - /'
 
-[ -f "$PAYLOAD/install.sh" ]   || { log_error "install.sh missing from payload"; exit 1; }
+[ -f "$PAYLOAD/install.sh" ] || die "install.sh missing from payload"
 
 if [ -z "$(find "$PAYLOAD" -maxdepth 1 -type f \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) -print -quit 2>/dev/null)" ]; then
-  log_error "luci-app-passwall package not found in payload"; exit 1
+  die "luci-app-passwall package not found in payload"
 fi
 
-log_info "Package validation passed"
+log_info "Payload validation passed"
 group_end

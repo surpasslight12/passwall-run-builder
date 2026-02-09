@@ -1,178 +1,141 @@
 #!/usr/bin/env bash
-# Compile all PassWall dependency packages and luci-app-passwall.
-# Packages are grouped by toolchain (C/C++, Go, Rust, Prebuilt/Data)
-# so that failures are easier to diagnose.
+# ─────────────────────────────────────────────────────────────────────────────
+# compile-packages.sh — 按工具链分组编译 PassWall 依赖包与主包
+# compile-packages.sh — Compile PassWall dependencies (grouped by toolchain)
+# ─────────────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 cd openwrt-sdk
 export FORCE_UNSAFE_CONFIGURE=1
 export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
-# Rust 1.90+ bootstrap panics when it detects a CI environment and
-# llvm.download-ci-llvm is set to "true".  GitHub Actions sets both CI and
-# GITHUB_ACTIONS; unsetting them lets the Rust toolchain build normally.
+
+# Rust ≥1.90 bootstrap 检测 CI 环境会 panic，必须取消这些变量
+# Rust ≥1.90 bootstrap panics when CI env vars are set
 unset CI GITHUB_ACTIONS
 
-# ── Package groups by toolchain ─────────────────────────────────────────────
-C_PACKAGES=(
-  dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev
-  simple-obfs tcping trojan-plus
-)
+# ── 包分组 / Package groups ────────────────────────────────────────────────
+C_PACKAGES=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
+GO_PACKAGES=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
+RUST_PACKAGES=(shadow-tls shadowsocks-rust)
+PREBUILT_PACKAGES=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
-GO_PACKAGES=(
-  geoview hysteria sing-box v2ray-plugin xray-core xray-plugin
-)
-
-RUST_PACKAGES=(
-  shadow-tls shadowsocks-rust
-)
-
-PREBUILT_PACKAGES=(
-  chinadns-ng naiveproxy tuic-client v2ray-geodata
-)
-
-# ── Configuration ───────────────────────────────────────────────────────────
-# Artifact freshness threshold in minutes - artifacts modified within this
-# timeframe are considered "fresh" (newly built in this session)
 ARTIFACT_FRESHNESS_MINUTES=${ARTIFACT_FRESHNESS_MINUTES:-5}
 
-# ── Helpers ─────────────────────────────────────────────────────────────────
-package_artifacts_exist() {
-  local pkg="$1"
+# ── 辅助函数 / Helpers ─────────────────────────────────────────────────────
+pkg_artifacts_exist() {
   [ -d bin/packages ] || return 1
-  find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
+  find bin/packages -type f \( -name "${1}_*.apk" -o -name "${1}-*.apk" \) -print -quit | grep -q .
 }
 
-# Check if artifacts were built in this session (modified recently)
-package_artifacts_fresh() {
-  local pkg="$1"
+pkg_artifacts_fresh() {
   [ -d bin/packages ] || return 1
   find bin/packages -type f -mmin -"$ARTIFACT_FRESHNESS_MINUTES" \
-    \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -print -quit | grep -q .
+    \( -name "${1}_*.apk" -o -name "${1}-*.apk" \) -print -quit | grep -q .
 }
 
-check_disk_space() {
-  local min_gb="${1:-10}"
-  local avail_kb; avail_kb=$(df / --output=avail | tail -1 | tr -d ' ')
-  local avail_gb=$((avail_kb / 1024 / 1024))
-  if [ "$avail_gb" -lt "$min_gb" ]; then
-    log_error "Insufficient disk space: ${avail_gb}GB (need ${min_gb}GB)"
-    return 1
-  fi
-  log_info "Available disk space: ${avail_gb}GB"
-  return 0
-}
+# ── 统计变量 / Counters ────────────────────────────────────────────────────
+TOTAL_BUILT=0  TOTAL_FAILED=0  TOTAL_FAILED_LIST=""
+GROUP_LABELS=()  GROUP_BUILT=()  GROUP_FAILED=()  GROUP_TIMES=()
 
-TOTAL_BUILT=0 TOTAL_FAILED=0 TOTAL_FAILED_LIST=""
-GROUP_LABELS=() GROUP_BUILT=() GROUP_FAILED=() GROUP_TIMES=()
-
-# build_group <group_label> <pkg1> <pkg2> …
+# ── build_group <label> <pkg…> ─────────────────────────────────────────────
 build_group() {
   local label="$1"; shift
   local pkgs=("$@")
-  local built=0 failed=0 failed_list=""
-  local group_start_time; group_start_time=$(date +%s)
+  local built=0 failed=0 failed_list="" t0; t0=$(date +%s)
 
   group_start "Building $label packages"
   log_info "Packages ($label): ${pkgs[*]}"
 
   for pkg in "${pkgs[@]}"; do
     log_info "Building ($label): $pkg"
-    PKG_PATH=""
-    [ -d "package/passwall-packages/$pkg" ] && PKG_PATH="package/passwall-packages/$pkg"
-    [ -z "$PKG_PATH" ] && [ -d "package/$pkg" ] && PKG_PATH="package/$pkg"
 
-    if [ -z "$PKG_PATH" ]; then
+    # 查找包路径 / Locate package path
+    local pkg_path=""
+    [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
+    [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
+    if [ -z "$pkg_path" ]; then
       log_warning "Package not found: $pkg"
       failed=$((failed + 1)); failed_list="$failed_list $pkg"; continue
     fi
 
-    # Remove stale cached artifacts so package_artifacts_exist only finds
-    # genuinely new output from the current build, not leftovers from the
-    # SDK cache that mask real compilation failures.
+    # 清除旧产物 / Remove stale artifacts
     find bin/packages -type f \( -name "${pkg}_*.apk" -o -name "${pkg}-*.apk" \) -delete 2>/dev/null || true
-    sync  # Ensure filesystem flushes deletes before checking artifacts
+    sync
 
-    if make_with_retry "$PKG_PATH/compile" "$pkg"; then
-      if package_artifacts_fresh "$pkg"; then
-        log_info "Successfully built fresh artifacts for $pkg"
-        built=$((built + 1))
+    if make_with_retry "$pkg_path/compile" "$pkg"; then
+      if pkg_artifacts_fresh "$pkg"; then
+        log_info "Fresh artifacts built for $pkg"
       else
-        log_warning "Build succeeded but no fresh artifacts for $pkg (using cached?)"
-        built=$((built + 1))
+        log_warning "Build OK but no fresh artifacts for $pkg (cached?)"
       fi
-    elif package_artifacts_exist "$pkg"; then
-      log_warning "Build returned error for $pkg but cached artifacts found"
+      built=$((built + 1))
+    elif pkg_artifacts_exist "$pkg"; then
+      log_warning "Build error for $pkg but cached artifacts found"
       built=$((built + 1))
     else
-      log_warning "Failed to compile ($label): $pkg (skipping)"
+      log_warning "Failed ($label): $pkg — skipping"
       failed=$((failed + 1)); failed_list="$failed_list $pkg"
     fi
   done
 
-  log_info "$label summary: $built succeeded, $failed failed"
+  local elapsed=$(($(date +%s) - t0))
+  log_info "$label: $built built, $failed failed (${elapsed}s)"
   [ -n "$failed_list" ] && log_warning "$label failed:$failed_list"
-  
-  local group_duration=$(($(date +%s) - group_start_time))
-  log_info "$label completed in ${group_duration}s"
   group_end
 
   TOTAL_BUILT=$((TOTAL_BUILT + built))
   TOTAL_FAILED=$((TOTAL_FAILED + failed))
   TOTAL_FAILED_LIST="$TOTAL_FAILED_LIST$failed_list"
-  GROUP_LABELS+=("$label"); GROUP_BUILT+=("$built"); GROUP_FAILED+=("$failed"); GROUP_TIMES+=("$group_duration")
+  GROUP_LABELS+=("$label")
+  GROUP_BUILT+=("$built")
+  GROUP_FAILED+=("$failed")
+  GROUP_TIMES+=("$elapsed")
 }
 
-# ── Compile dependencies ────────────────────────────────────────────────────
-log_info "Parallel jobs: $(nproc)"
-log_info "Disk before build: $(df -h / --output=avail | tail -1 | tr -d ' ')"
-
-check_disk_space 10 || { log_error "Insufficient disk space to continue"; exit 1; }
+# ── 开始编译 / Start compilation ───────────────────────────────────────────
+log_info "Jobs: $(nproc)  Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+check_disk_space 10 || die "Insufficient disk space"
 
 build_group "C/C++"    "${C_PACKAGES[@]}"
-check_disk_space 5 || log_warning "Low disk space after C/C++ builds"
+check_disk_space 5 || log_warning "Low disk after C/C++"
 
 build_group "Go"       "${GO_PACKAGES[@]}"
-check_disk_space 5 || log_warning "Low disk space after Go builds"
+check_disk_space 5 || log_warning "Low disk after Go"
 
 build_group "Rust"     "${RUST_PACKAGES[@]}"
-check_disk_space 5 || log_warning "Low disk space after Rust builds"
+check_disk_space 5 || log_warning "Low disk after Rust"
 
 build_group "Prebuilt" "${PREBUILT_PACKAGES[@]}"
 
-log_info "Overall summary: $TOTAL_BUILT succeeded, $TOTAL_FAILED failed"
+# ── 编译摘要 / Build summary ──────────────────────────────────────────────
+log_info "Total: $TOTAL_BUILT built, $TOTAL_FAILED failed"
 [ -n "$TOTAL_FAILED_LIST" ] && log_warning "Failed:$TOTAL_FAILED_LIST"
 
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  {
-    echo "## PassWall Dependency Build Summary"
-    echo "| Group | Built | Failed | Time |"
-    echo "|-------|-------|--------|------|"
-    for i in "${!GROUP_LABELS[@]}"; do
-      local time_str="${GROUP_TIMES[$i]}s"
-      if [ "${GROUP_TIMES[$i]}" -ge 60 ]; then
-        time_str="$((GROUP_TIMES[$i] / 60))m $((GROUP_TIMES[$i] % 60))s"
-      fi
-      echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $time_str |"
-    done
-    echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | - |"
-    if [ -n "$TOTAL_FAILED_LIST" ]; then
-      echo "### Failed Packages"
-      for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
-      echo ""
-      echo "**Note**: If build failures persist, try incrementing CACHE_VERSION in workflow to clear caches."
-    fi
-    echo "### Build Artifact Safety"
-    echo "- Stale cached APK artifacts are removed before each package build"
-    echo "- Only fresh artifacts (modified within ${ARTIFACT_FRESHNESS_MINUTES}min) are counted as successful"
-    echo "- This prevents cached artifacts from masking real build failures"
-  } >> "$GITHUB_STEP_SUMMARY"
-fi
+# 写入 GitHub Step Summary / Write step summary
+write_summary() {
+  echo "## PassWall Build Summary"
+  echo "| Group | Built | Failed | Time |"
+  echo "|-------|-------|--------|------|"
+  for i in "${!GROUP_LABELS[@]}"; do
+    local t="${GROUP_TIMES[$i]}"
+    local ts="${t}s"; [ "$t" -ge 60 ] && ts="$((t / 60))m $((t % 60))s"
+    echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $ts |"
+  done
+  echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | — |"
+  if [ -n "$TOTAL_FAILED_LIST" ]; then
+    echo ""
+    echo "### Failed Packages"
+    for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
+  fi
+}
+
+[ -n "${GITHUB_STEP_SUMMARY:-}" ] && write_summary >> "$GITHUB_STEP_SUMMARY"
 
 log_info "Disk after deps: $(df -h / --output=avail | tail -1 | tr -d ' ')"
 
-# ── Compile luci-app-passwall ───────────────────────────────────────────────
+# ── 编译 luci-app-passwall / Compile main package ─────────────────────────
 group_start "Compiling luci-app-passwall"
 make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall" \
-  || { log_error "Failed to compile luci-app-passwall"; exit 1; }
+  || die "Failed to compile luci-app-passwall"
 group_end
