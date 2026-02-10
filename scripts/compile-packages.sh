@@ -126,8 +126,8 @@ write_summary() {
   echo "| Group | Built | Failed | Time |"
   echo "|-------|-------|--------|------|"
   for i in "${!GROUP_LABELS[@]}"; do
-    local t="${GROUP_TIMES[$i]}"
-    local ts="${t}s"; [ "$t" -ge 60 ] && ts="$((t / 60))m $((t % 60))s"
+    t="${GROUP_TIMES[$i]}"
+    ts="${t}s"; [ "$t" -ge 60 ] && ts="$((t / 60))m $((t % 60))s"
     echo "| ${GROUP_LABELS[$i]} | ${GROUP_BUILT[$i]} | ${GROUP_FAILED[$i]} | $ts |"
   done
   echo "| **Total** | **$TOTAL_BUILT** | **$TOTAL_FAILED** | — |"
