@@ -14,6 +14,14 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 # Rust ≥1.90 bootstrap panics when CI env vars are set
 unset CI GITHUB_ACTIONS
 
+# ── 构建配置 / Build configuration ────────────────────────────────────────
+# 最少成功包数（允许部分包失败）
+# Minimum successful packages to consider build successful
+MIN_REQUIRED_PACKAGES=${MIN_REQUIRED_PACKAGES:-15}
+# 最大允许失败包数
+# Maximum allowed failed packages before build fails
+MAX_ALLOWED_FAILURES=${MAX_ALLOWED_FAILURES:-5}
+
 # ── 包分组 / Package groups ────────────────────────────────────────────────
 C_PACKAGES=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
 GO_PACKAGES=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
@@ -128,14 +136,35 @@ write_summary() {
     echo "### Failed Packages"
     for p in $TOTAL_FAILED_LIST; do echo "- \`$p\`"; done
   fi
+  echo ""
+  echo "### Build Status"
+  if [ "$TOTAL_BUILT" -ge "$MIN_REQUIRED_PACKAGES" ] && [ "$TOTAL_FAILED" -le "$MAX_ALLOWED_FAILURES" ]; then
+    echo "✅ Build requirements met ($TOTAL_BUILT ≥ $MIN_REQUIRED_PACKAGES, failures $TOTAL_FAILED ≤ $MAX_ALLOWED_FAILURES)"
+  else
+    echo "⚠️ Build requirements not fully met (need $MIN_REQUIRED_PACKAGES packages, max $MAX_ALLOWED_FAILURES failures)"
+  fi
 }
 
 [ -n "${GITHUB_STEP_SUMMARY:-}" ] && write_summary >> "$GITHUB_STEP_SUMMARY"
 
 log_info "Disk after deps: $(df -h / --output=avail | tail -1 | tr -d ' ')"
 
+# ── 检查依赖包构建结果 / Check dependency build results ───────────────────
+# 如果失败太多或成功太少，提前退出
+# Fail early if too many failures or not enough successes
+if [ "$TOTAL_FAILED" -gt "$MAX_ALLOWED_FAILURES" ]; then
+  die "Too many package failures: $TOTAL_FAILED (max allowed: $MAX_ALLOWED_FAILURES)"
+fi
+if [ "$TOTAL_BUILT" -lt "$MIN_REQUIRED_PACKAGES" ]; then
+  log_warning "Only $TOTAL_BUILT packages built (minimum required: $MIN_REQUIRED_PACKAGES)"
+  # 继续尝试编译主包，collect-packages.sh 会进行最终验证
+  # Continue to try compiling main package; collect-packages.sh will do final validation
+fi
+
 # ── 编译 luci-app-passwall / Compile main package ─────────────────────────
 group_start "Compiling luci-app-passwall"
 make_with_retry "package/luci-app-passwall/compile" "luci-app-passwall" \
   || die "Failed to compile luci-app-passwall"
 group_end
+
+log_info "Compilation completed: $TOTAL_BUILT dependencies + luci-app-passwall"

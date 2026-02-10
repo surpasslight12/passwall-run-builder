@@ -9,6 +9,14 @@ on:
         description: 'Enable caching (SDK / Go / Rust / Feeds)'
         required: false
         default: 'true'
+      min_required_packages:
+        description: 'Minimum required packages for successful build'
+        required: false
+        default: '15'
+      max_allowed_failures:
+        description: 'Maximum allowed package failures'
+        required: false
+        default: '5'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +24,8 @@ concurrency:
 
 env:
   CACHE_VERSION: v1
+  MIN_REQUIRED_PACKAGES: ${{ inputs.min_required_packages || '15' }}
+  MAX_ALLOWED_FAILURES: ${{ inputs.max_allowed_failures || '5' }}
 
 jobs:
   build-installer:
@@ -152,6 +162,7 @@ jobs:
             echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'N/A')"
             echo "- **Disk**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
             echo "- **SDK URL**: \`${OPENWRT_SDK_URL:-not set}\`"
+            echo "- **Build Tolerance**: min packages=${MIN_REQUIRED_PACKAGES:-15}, max failures=${MAX_ALLOWED_FAILURES:-5}"
             echo "- **Cache**: SDK=${{ steps.cache-sdk.outputs.cache-hit || 'off' }}"
             echo "  Feeds=${{ steps.cache-feeds.outputs.cache-hit || 'off' }}"
             echo "  Go=${{ steps.cache-go.outputs.cache-hit || 'off' }}"
