@@ -6,15 +6,15 @@ on:
   workflow_dispatch:
     inputs:
       use_cache:
-        description: 'Enable caching (SDK / Go / Rust / Feeds)'
+        description: 'Enable caching'
         required: false
         default: 'true'
       min_required_packages:
-        description: 'Minimum required packages for successful build'
+        description: 'Minimum required packages'
         required: false
         default: '15'
       max_allowed_failures:
-        description: 'Maximum allowed package failures'
+        description: 'Maximum allowed failures'
         required: false
         default: '5'
 
@@ -28,79 +28,58 @@ env:
   MAX_ALLOWED_FAILURES: ${{ inputs.max_allowed_failures || '5' }}
 
 jobs:
-  build-installer:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
       contents: write
 
     steps:
-      # ── Checkout ──────────────────────────────────────────────────────────
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ── Load configuration ────────────────────────────────────────────────
-      - name: Load configuration
-        id: config
+      - name: Load config
+        id: cfg
         run: |
-          source "$GITHUB_WORKSPACE/scripts/lib.sh"
-
-          CONFIG="config/openwrt-sdk.conf"
-          [ -f "$CONFIG" ] && [ -s "$CONFIG" ] \
-            || die "Config missing or empty: $CONFIG"
-
-          log_info "Loading $CONFIG"
+          source scripts/lib.sh
           while IFS= read -r line || [ -n "$line" ]; do
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
             [[ -z "${line// }" ]] && continue
-            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && {
-              echo "$line" >> "$GITHUB_ENV"; export "$line"
-            }
-          done < "$CONFIG"
+            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && { echo "$line" >> "$GITHUB_ENV"; export "$line"; }
+          done < config/openwrt-sdk.conf
+          [ -n "${OPENWRT_SDK_URL:-}" ] || { echo "::error::OPENWRT_SDK_URL not set"; exit 1; }
+          echo "sdk-hash=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "week=$(date +%G-W%V)" >> "$GITHUB_OUTPUT"
 
-          [ -n "${OPENWRT_SDK_URL:-}" ] \
-            || die "OPENWRT_SDK_URL not defined in $CONFIG"
-          log_info "SDK URL: $OPENWRT_SDK_URL"
-
-          SDK_HASH=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)
-          WEEK_KEY=$(date +%G-W%V)
-          PW_KEY="${PASSWALL_LUCI_REF:-latest}"
-          echo "sdk-hash=$SDK_HASH"   >> "$GITHUB_OUTPUT"
-          echo "week-key=$WEEK_KEY"   >> "$GITHUB_OUTPUT"
-          echo "passwall-key=$PW_KEY" >> "$GITHUB_OUTPUT"
-
-      # ── Caches ────────────────────────────────────────────────────────────
-      - name: Cache OpenWrt SDK
+      # ── Caches ──
+      - name: Cache SDK
         if: inputs.use_cache != 'false'
         id: cache-sdk
         uses: actions/cache@v4
         with:
           path: openwrt-sdk
-          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.config.outputs.sdk-hash }}
+          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cfg.outputs.sdk-hash }}
           restore-keys: ${{ env.CACHE_VERSION }}-sdk-
 
       - name: Cache Go modules
         if: inputs.use_cache != 'false'
-        id: cache-go
         uses: actions/cache@v4
         with:
           path: openwrt-sdk/dl/go-mod-cache
-          key: ${{ env.CACHE_VERSION }}-go-${{ steps.config.outputs.week-key }}
+          key: ${{ env.CACHE_VERSION }}-go-${{ steps.cfg.outputs.week }}
           restore-keys: ${{ env.CACHE_VERSION }}-go-
 
       - name: Cache Rust/Cargo
         if: inputs.use_cache != 'false'
-        id: cache-rust
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             ~/.rustup
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.config.outputs.week-key }}
+          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
           restore-keys: ${{ env.CACHE_VERSION }}-rust-
 
-      - name: Cache OpenWrt feeds
+      - name: Cache feeds
         if: inputs.use_cache != 'false'
         id: cache-feeds
         uses: actions/cache@v4
@@ -108,41 +87,39 @@ jobs:
           path: |
             openwrt-sdk/feeds
             openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-${{ steps.config.outputs.passwall-key }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-feeds-${{ steps.config.outputs.week-key }}-
-            ${{ env.CACHE_VERSION }}-feeds-
+          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
+          restore-keys: ${{ env.CACHE_VERSION }}-feeds-
 
-      # ── Build pipeline ────────────────────────────────────────────────────
-      - name: Prepare build environment
+      # ── Build pipeline ──
+      - name: Setup environment
         run: scripts/setup-environment.sh
 
       - name: Install toolchains
         run: scripts/install-toolchains.sh
 
-      - name: Setup OpenWrt SDK
+      - name: Setup SDK
         run: scripts/setup-sdk.sh "${{ steps.cache-sdk.outputs.cache-hit }}"
 
-      - name: Configure SDK and feeds
+      - name: Configure feeds
         run: scripts/configure-feeds.sh "${{ steps.cache-feeds.outputs.cache-hit }}"
 
-      - name: Compile PassWall packages
+      - name: Compile packages
         run: scripts/compile-packages.sh
 
-      - name: Collect and validate packages
+      - name: Collect packages
         run: scripts/collect-packages.sh
 
-      - name: Build and verify installer
+      - name: Build installer
         run: scripts/build-installer.sh
 
-      # ── Publish ───────────────────────────────────────────────────────────
+      # ── Publish ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.RUN_NAME }}
           path: ${{ env.RUN_NAME }}
 
-      - name: Create GitHub Release
+      - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -151,25 +128,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Diagnostics ───────────────────────────────────────────────────────
-      - name: Build diagnostics
+      - name: Diagnostics
         if: always()
         run: |
           {
-            echo "### Build Environment"
-            echo "- **Runner**: $(uname -a)"
-            echo "- **Go**: $(go version 2>/dev/null || echo 'N/A')"
-            echo "- **Rust**: $(rustc --version 2>/dev/null || echo 'N/A')"
-            echo "- **Disk**: $(df -h / --output=avail | tail -1 | tr -d ' ')"
-            echo "- **SDK URL**: \`${OPENWRT_SDK_URL:-not set}\`"
-            echo "- **Build Tolerance**: min packages=${MIN_REQUIRED_PACKAGES:-15}, max failures=${MAX_ALLOWED_FAILURES:-5}"
-            echo "- **Cache**: SDK=${{ steps.cache-sdk.outputs.cache-hit || 'off' }}"
-            echo "  Feeds=${{ steps.cache-feeds.outputs.cache-hit || 'off' }}"
-            echo "  Go=${{ steps.cache-go.outputs.cache-hit || 'off' }}"
-            echo "  Rust=${{ steps.cache-rust.outputs.cache-hit || 'off' }}"
-            if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
-              echo "- **Installer**: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
-            else
-              echo "- **Installer**: not built"
-            fi
+            echo "### Build Info"
+            echo "- Go: $(go version 2>/dev/null || echo N/A)"
+            echo "- Rust: $(rustc --version 2>/dev/null || echo N/A)"
+            echo "- Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+            echo "- SDK: \`${OPENWRT_SDK_URL:-not set}\`"
+            [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ] \
+              && echo "- Installer: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))" \
+              || echo "- Installer: not built"
           } >> "$GITHUB_STEP_SUMMARY"
