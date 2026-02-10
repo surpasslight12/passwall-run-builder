@@ -48,7 +48,7 @@ make_pkg() {
   fi
 
   log_error "Build failed: $label"
-  tail -40 "$logfile" 2>/dev/null || true
+  tail -50 "$logfile" 2>/dev/null || true
   rm -f "$logfile"; return 1
 }
 

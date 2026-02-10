@@ -118,7 +118,11 @@ if [ -f "$PKGCONF" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     [[ -z "${line// }" ]] && continue
-    [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] && echo "CONFIG_PACKAGE_${line}=m" >> .config
+    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+      echo "CONFIG_PACKAGE_${line}=m" >> .config
+    else
+      log_warn "Skipping invalid package name: $line"
+    fi
   done < "$PKGCONF"
 else
   log_warn "packages.conf not found"
