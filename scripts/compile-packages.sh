@@ -20,7 +20,7 @@ TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST=""
 # ── 编译一组包 / Build a group ──
 # Usage: build_group <label> <timeout_minutes> <package1> [package2...]
 build_group() {
-  local label="$1" timeout="$2"; shift 2
+  local label="$1" timeout_min="$2"; shift 2
   local ok=0 fail=0 t0; t0=$(date +%s)
 
   group_start "Build $label"
@@ -32,7 +32,7 @@ build_group() {
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; continue
     fi
 
-    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout"; then
+    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
       ok=$((ok + 1))
     else
       log_warn "Skipping failed package: $pkg"

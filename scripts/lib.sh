@@ -36,8 +36,14 @@ make_pkg() {
   local target="$1" label="${2:-$1}" timeout_min="${3:-60}"
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-${label//\//_}-$$.log"
-  local timeout_sec=$((timeout_min * 60))
-  local exit_code
+  local timeout_sec exit_code
+
+  # Validate timeout
+  if ! [[ "$timeout_min" =~ ^[0-9]+$ ]] || [ "$timeout_min" -le 0 ]; then
+    log_error "Invalid timeout: $timeout_min (must be positive integer)"
+    return 1
+  fi
+  timeout_sec=$((timeout_min * 60))
 
   log_info "Compiling $label (-j$jobs, timeout: ${timeout_min}m)"
   timeout "$timeout_sec" make "$target" -j"$jobs" V=s >"$logfile" 2>&1
