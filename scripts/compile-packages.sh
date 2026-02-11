@@ -9,6 +9,20 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 # Rust ≥1.90 bootstrap panics when CI env vars are set
 unset CI GITHUB_ACTIONS
 
+# Rust 编译优化 / Rust compilation optimizations
+export RUSTFLAGS="-C opt-level=3 -C codegen-units=256 -C strip=symbols"
+export CARGO_INCREMENTAL=1
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+# 启用 sccache 加速编译 / Enable sccache for faster compilation
+if command -v sccache >/dev/null 2>&1; then
+  export RUSTC_WRAPPER=sccache
+  export SCCACHE_DIR="$HOME/.cache/sccache"
+  mkdir -p "$SCCACHE_DIR"
+  sccache --start-server 2>/dev/null || true
+  log_info "sccache enabled for Rust compilation"
+fi
+
+
 # ── 包分组 / Package groups ──
 C_PKGS=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
 GO_PKGS=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
@@ -51,7 +65,7 @@ check_disk_space 10
 
 build_group "C/C++"    30 "${C_PKGS[@]}"
 build_group "Go"       30 "${GO_PKGS[@]}"
-build_group "Rust"     45 "${RUST_PKGS[@]}"
+build_group "Rust"     35 "${RUST_PKGS[@]}"
 build_group "Prebuilt" 30 "${PRE_PKGS[@]}"
 
 log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
@@ -77,5 +91,12 @@ group_start "Compile luci-app-passwall"
 make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" 30 \
   || die "Failed to compile luci-app-passwall"
 group_end
+
+# ── sccache 统计 / sccache statistics ──
+if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
+  group_start "sccache statistics"
+  sccache --show-stats || true
+  group_end
+fi
 
 log_info "Compilation complete: $TOTAL_OK deps + luci-app-passwall"
