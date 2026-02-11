@@ -31,20 +31,27 @@ retry() {
 }
 
 # ── Make 封装：并行 → 单线程降级 / Make wrapper with fallback ──
-# Usage: make_pkg <target> [label]
+# Usage: make_pkg <target> [label] [timeout_minutes]
 make_pkg() {
-  local target="$1" label="${2:-$1}"
+  local target="$1" label="${2:-$1}" timeout_min="${3:-60}"
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-${label//\//_}-$$.log"
+  local timeout_sec=$((timeout_min * 60))
 
-  log_info "Compiling $label (-j$jobs)"
-  if make "$target" -j"$jobs" V=s >"$logfile" 2>&1; then
+  log_info "Compiling $label (-j$jobs, timeout: ${timeout_min}m)"
+  if timeout "$timeout_sec" make "$target" -j"$jobs" V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
+  elif [ $? -eq 124 ]; then
+    log_error "Build timeout: $label (exceeded ${timeout_min}m)"
+    rm -f "$logfile"; return 1
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  if make "$target" -j1 V=s >"$logfile" 2>&1; then
+  if timeout "$timeout_sec" make "$target" -j1 V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
+  elif [ $? -eq 124 ]; then
+    log_error "Build timeout: $label (exceeded ${timeout_min}m)"
+    rm -f "$logfile"; return 1
   fi
 
   log_error "Build failed: $label"

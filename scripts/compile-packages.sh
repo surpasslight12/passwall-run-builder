@@ -18,8 +18,9 @@ PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST=""
 
 # ── 编译一组包 / Build a group ──
+# Usage: build_group <label> <timeout_minutes> <package1> [package2...]
 build_group() {
-  local label="$1"; shift
+  local label="$1" timeout="$2"; shift 2
   local ok=0 fail=0 t0; t0=$(date +%s)
 
   group_start "Build $label"
@@ -31,7 +32,7 @@ build_group() {
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; continue
     fi
 
-    if make_pkg "${pkg_path}/compile" "$pkg"; then
+    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout"; then
       ok=$((ok + 1))
     else
       log_warn "Skipping failed package: $pkg"
@@ -48,10 +49,10 @@ build_group() {
 # ── 开始编译 / Start ──
 check_disk_space 10
 
-build_group "C/C++"    "${C_PKGS[@]}"
-build_group "Go"       "${GO_PKGS[@]}"
-build_group "Rust"     "${RUST_PKGS[@]}"
-build_group "Prebuilt" "${PRE_PKGS[@]}"
+build_group "C/C++"    30 "${C_PKGS[@]}"
+build_group "Go"       30 "${GO_PKGS[@]}"
+build_group "Rust"     45 "${RUST_PKGS[@]}"
+build_group "Prebuilt" 30 "${PRE_PKGS[@]}"
 
 log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
 [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
@@ -73,7 +74,7 @@ MAX_FAILURES=${MAX_ALLOWED_FAILURES:-5}
 
 # ── 编译主包 / Compile main package ──
 group_start "Compile luci-app-passwall"
-make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" \
+make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" 30 \
   || die "Failed to compile luci-app-passwall"
 group_end
 
