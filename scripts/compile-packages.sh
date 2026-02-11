@@ -70,7 +70,7 @@ check_disk_space 10
 
 build_group "C/C++"    30 "${C_PKGS[@]}"
 build_group "Go"       30 "${GO_PKGS[@]}"
-build_group "Rust"     35 "${RUST_PKGS[@]}"
+build_group "Rust"     50 "${RUST_PKGS[@]}"
 build_group "Prebuilt" 30 "${PRE_PKGS[@]}"
 
 log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
