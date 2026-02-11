@@ -43,4 +43,13 @@ rustup target list --installed | grep -q x86_64-unknown-linux-musl \
   || rustup target add x86_64-unknown-linux-musl
 rustc --version && cargo --version || die "Rust verification failed"
 
+# 安装 sccache 用于加速 Rust 编译 / Install sccache for faster Rust builds
+if ! command -v sccache >/dev/null 2>&1; then
+  log_info "Installing sccache"
+  # 最多 3 次尝试，每次间隔 20 秒 / Up to 3 attempts with 20s delay
+  retry 3 20 cargo install sccache --locked
+else
+  log_info "sccache already installed: $(sccache --version)"
+fi
+
 group_end

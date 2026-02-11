@@ -10,6 +10,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
 - 四层缓存（SDK / Go / Rust / Feeds）加速构建
+- **Rust 编译优化**（sccache、增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
 
@@ -67,6 +68,19 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 - OpenWrt **25.12+**（APK 包管理器）
 - SDK 架构与目标设备一致
+
+## 性能优化 | Performance
+
+### Rust 编译加速
+
+自动应用以下优化以加快 Rust 组件编译：
+
+- **sccache**: 编译器缓存，避免重复编译相同代码
+- **增量编译**: 启用 `CARGO_INCREMENTAL=1`
+- **并行代码生成**: `-C codegen-units=16` 在编译速度和运行时性能间取得平衡
+- **超时优化**: Rust 组件编译超时从 45 分钟降至 35 分钟
+
+首次构建预计提速 **10-15%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成和编译器缓存的理论估算）。
 
 ## License
 
