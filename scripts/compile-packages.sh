@@ -10,9 +10,9 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 unset CI GITHUB_ACTIONS
 
 # Rust 编译优化 / Rust compilation optimizations
-# 优化级别和并行代码生成加速编译，同时保持二进制大小合理
-# Optimization level and parallel codegen for faster builds while keeping binary size reasonable
-export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=256"
+# 并行代码生成加速编译，16 是编译速度和运行时性能的平衡点
+# Parallel codegen for faster builds, 16 balances compile time and runtime performance
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=16"
 export CARGO_INCREMENTAL=1
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 # 启用 sccache 加速编译 / Enable sccache for faster compilation
@@ -20,8 +20,11 @@ if command -v sccache >/dev/null 2>&1; then
   export RUSTC_WRAPPER=sccache
   export SCCACHE_DIR="$HOME/.cache/sccache"
   mkdir -p "$SCCACHE_DIR"
-  sccache --start-server 2>/dev/null || true
-  log_info "sccache enabled for Rust compilation"
+  if ! sccache --start-server 2>/dev/null; then
+    log_warn "sccache server failed to start, builds will proceed without caching"
+  else
+    log_info "sccache enabled for Rust compilation"
+  fi
 fi
 
 

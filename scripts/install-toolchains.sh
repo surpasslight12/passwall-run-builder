@@ -48,7 +48,7 @@ if ! command -v sccache >/dev/null 2>&1; then
   log_info "Installing sccache"
   retry 3 20 cargo install sccache --locked
 else
-  log_info "sccache $(sccache --version | awk '{print $2}') already installed"
+  log_info "sccache already installed: $(sccache --version)"
 fi
 
 group_end
