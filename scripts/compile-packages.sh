@@ -10,7 +10,9 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 unset CI GITHUB_ACTIONS
 
 # Rust 编译优化 / Rust compilation optimizations
-export RUSTFLAGS="-C opt-level=3 -C codegen-units=256 -C strip=symbols"
+# 优化级别和并行代码生成加速编译，同时保持二进制大小合理
+# Optimization level and parallel codegen for faster builds while keeping binary size reasonable
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=256"
 export CARGO_INCREMENTAL=1
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 # 启用 sccache 加速编译 / Enable sccache for faster compilation
