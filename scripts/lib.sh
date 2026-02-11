@@ -36,7 +36,7 @@ make_pkg() {
   local target="$1" label="${2:-$1}" timeout_min="${3:-60}"
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-${label//\//_}-$$.log"
-  local timeout_sec=0 exit_code=0
+  local timeout_sec exit_code=0
 
   # Validate timeout
   if ! [[ "$timeout_min" =~ ^[0-9]+$ ]] || [[ "$timeout_min" -le 0 ]]; then
