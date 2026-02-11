@@ -10,8 +10,8 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 unset CI GITHUB_ACTIONS
 
 # Rust 编译优化 / Rust compilation optimizations
-# 并行代码生成加速编译，16 是编译速度和运行时性能的平衡点
-# Parallel codegen for faster builds, 16 balances compile time and runtime performance
+# 并行代码生成加速编译。16 是 Rust 推荐的生产环境值（1-16），在编译速度和运行时优化间取得平衡
+# Parallel codegen for faster builds. 16 is Rust's recommended production value (1-16), balancing compile time and runtime optimization
 export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=16"
 export CARGO_INCREMENTAL=1
 export CARGO_NET_GIT_FETCH_WITH_CLI=true

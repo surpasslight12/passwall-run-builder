@@ -80,7 +80,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - **并行代码生成**: `-C codegen-units=16` 在编译速度和运行时性能间取得平衡
 - **超时优化**: Rust 组件编译超时从 45 分钟降至 35 分钟
 
-首次构建预计提速 **10-15%**，后续构建通过 sccache 可提速 **40-60%**。
+首次构建预计提速 **10-15%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成和编译器缓存的理论估算）。
 
 ## License
 
