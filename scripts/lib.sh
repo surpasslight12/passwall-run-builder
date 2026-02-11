@@ -37,19 +37,24 @@ make_pkg() {
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-${label//\//_}-$$.log"
   local timeout_sec=$((timeout_min * 60))
+  local exit_code
 
   log_info "Compiling $label (-j$jobs, timeout: ${timeout_min}m)"
-  if timeout "$timeout_sec" make "$target" -j"$jobs" V=s >"$logfile" 2>&1; then
+  timeout "$timeout_sec" make "$target" -j"$jobs" V=s >"$logfile" 2>&1
+  exit_code=$?
+  if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
-  elif [ $? -eq 124 ]; then
+  elif [ $exit_code -eq 124 ]; then
     log_error "Build timeout: $label (exceeded ${timeout_min}m)"
     rm -f "$logfile"; return 1
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  if timeout "$timeout_sec" make "$target" -j1 V=s >"$logfile" 2>&1; then
+  timeout "$timeout_sec" make "$target" -j1 V=s >"$logfile" 2>&1
+  exit_code=$?
+  if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
-  elif [ $? -eq 124 ]; then
+  elif [ $exit_code -eq 124 ]; then
     log_error "Build timeout: $label (exceeded ${timeout_min}m)"
     rm -f "$logfile"; return 1
   fi
