@@ -58,6 +58,14 @@ build_group() {
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
+      pkg_dur=$(( $(date +%s) - pkg_t0 ))
+      log_info "$pkg finished in ${pkg_dur}s ($status)"
+      if [ -n "$PKG_TIMINGS" ]; then
+        PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${pkg_dur}")
+      else
+        PKG_TIMINGS="${label}|${pkg}|${status}|${pkg_dur}"
+      fi
+      continue
     elif make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
       ok=$((ok + 1))
       status="ok"
@@ -67,7 +75,11 @@ build_group() {
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
     log_info "$pkg finished in ${pkg_dur}s ($status)"
-    PKG_TIMINGS="${PKG_TIMINGS}${PKG_TIMINGS:+$'\n'}${label}|${pkg}|${status}|${pkg_dur}"
+    if [ -n "$PKG_TIMINGS" ]; then
+      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${pkg_dur}")
+    else
+      PKG_TIMINGS="${label}|${pkg}|${status}|${pkg_dur}"
+    fi
   done
   log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
   group_end
