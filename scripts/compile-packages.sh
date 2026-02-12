@@ -53,11 +53,8 @@ build_group() {
   add_timing() {
     local name="$1" status="$2" duration="$3"
     log_info "$name finished in ${duration}s ($status)"
-    if [ -n "$PKG_TIMINGS" ]; then
-      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${name}|${status}|${duration}")
-    else
-      PKG_TIMINGS="${label}|${name}|${status}|${duration}"
-    fi
+    PKG_TIMINGS+="${label}|${name}|${status}|${duration}
+"
   }
 
   group_start "Build $label"
@@ -141,7 +138,7 @@ if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       echo "### sccache statistics"
-      echo '```text'
+      echo '```'
       printf '%s\n' "$SCCACHE_STATS"
       echo '```'
     } >> "$GITHUB_STEP_SUMMARY"
