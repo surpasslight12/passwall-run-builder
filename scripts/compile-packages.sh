@@ -59,17 +59,20 @@ build_group() {
   }
 
   group_start "Build $label (${total_pkgs} packages)"
+  # Build feeds path lookup cache for fallback
+  local -A feeds_cache=()
+  while IFS= read -r -d '' fpath; do
+    local fname; fname=$(basename "$fpath")
+    feeds_cache["$fname"]="$fpath"
+  done < <(find package/feeds -maxdepth 2 -type l -print0 2>/dev/null)
+
   local idx=0
   for pkg in "$@"; do
     idx=$((idx + 1))
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
-    [ -z "$pkg_path" ] && {
-      local feeds_match
-      feeds_match=$(find package/feeds -maxdepth 2 -type l -name "$pkg" 2>/dev/null | head -1)
-      [ -n "$feeds_match" ] && pkg_path="$feeds_match"
-    }
+    [ -z "$pkg_path" ] && [ -n "${feeds_cache[$pkg]+x}" ] && pkg_path="${feeds_cache[$pkg]}"
     if [ -z "$pkg_path" ]; then
       log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
       fail=$((fail + 1))
