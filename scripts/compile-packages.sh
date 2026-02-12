@@ -55,7 +55,7 @@ build_group() {
     local display_time="$duration"
     [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
     log_info "$name finished in ${display_time} ($status)"
-    PKG_TIMINGS+="${label}|${name}|${status}|${duration}"$'\n'
+    PKG_TIMINGS+="${label}|${name}|${status}|${display_time}"$'\n'
   }
 
   group_start "Build $label"
@@ -111,11 +111,7 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       echo "| --- | --- | --- | --- |"
       while IFS='|' read -r group pkg status sec; do
         [ -z "$group" ] && continue
-        if [[ "$sec" =~ ^[0-9]+$ ]]; then
-          echo "| $group | $pkg | $status | ${sec}s |"
-        else
-          echo "| $group | $pkg | $status | $sec |"
-        fi
+        echo "| $group | $pkg | $status | $sec |"
       done <<EOF
 $PKG_TIMINGS
 EOF
