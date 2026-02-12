@@ -144,7 +144,7 @@ if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       echo "### sccache statistics"
-      echo '```'
+      echo '```text'
       printf '%s\n' "$SCCACHE_STATS"
       echo '```'
     } >> "$GITHUB_STEP_SUMMARY"
