@@ -34,6 +34,11 @@ GO_PKGS=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
 RUST_PKGS=(shadow-tls shadowsocks-rust)
 PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
+C_TIMEOUT_MIN=${C_TIMEOUT_MIN:-30}
+GO_TIMEOUT_MIN=${GO_TIMEOUT_MIN:-30}
+RUST_TIMEOUT_MIN=${RUST_TIMEOUT_MIN:-45}
+PRE_TIMEOUT_MIN=${PRE_TIMEOUT_MIN:-30}
+
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST=""
 
 # ── 编译一组包 / Build a group ──
@@ -68,10 +73,10 @@ build_group() {
 # ── 开始编译 / Start ──
 check_disk_space 10
 
-build_group "C/C++"    30 "${C_PKGS[@]}"
-build_group "Go"       30 "${GO_PKGS[@]}"
-build_group "Rust"     50 "${RUST_PKGS[@]}"
-build_group "Prebuilt" 30 "${PRE_PKGS[@]}"
+build_group "Rust"     "$RUST_TIMEOUT_MIN" "${RUST_PKGS[@]}"
+build_group "Go"       "$GO_TIMEOUT_MIN" "${GO_PKGS[@]}"
+build_group "C/C++"    "$C_TIMEOUT_MIN" "${C_PKGS[@]}"
+build_group "Prebuilt" "$PRE_TIMEOUT_MIN" "${PRE_PKGS[@]}"
 
 log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
 [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
