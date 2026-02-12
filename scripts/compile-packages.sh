@@ -12,9 +12,12 @@ unset CI GITHUB_ACTIONS
 # Rust 编译优化 / Rust compilation optimizations
 # 并行代码生成加速编译。16 是 Rust 推荐的生产环境值（1-16），在编译速度和运行时优化间取得平衡
 # Parallel codegen for faster builds. 16 is Rust's recommended production value (1-16), balancing compile time and runtime optimization
-export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=16"
+# 禁用 LTO 以加速编译，设置基础优化级别 / Disable LTO for faster compilation, set basic optimization level
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=16 -C lto=off -C opt-level=2"
 export CARGO_INCREMENTAL=1
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
+# 减少调试信息以加速编译和链接 / Reduce debug info to speed up compilation and linking
+export CARGO_PROFILE_RELEASE_DEBUG=0
 # 启用 sccache 加速编译 / Enable sccache for faster compilation
 if command -v sccache >/dev/null 2>&1; then
   export RUSTC_WRAPPER=sccache
@@ -36,7 +39,7 @@ PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
 C_TIMEOUT_MIN=${C_TIMEOUT_MIN:-30}
 GO_TIMEOUT_MIN=${GO_TIMEOUT_MIN:-30}
-RUST_TIMEOUT_MIN=${RUST_TIMEOUT_MIN:-45}
+RUST_TIMEOUT_MIN=${RUST_TIMEOUT_MIN:-60}
 PRE_TIMEOUT_MIN=${PRE_TIMEOUT_MIN:-30}
 
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST=""
