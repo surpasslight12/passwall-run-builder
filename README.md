@@ -85,6 +85,14 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 首次构建预计提速 **20-30%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成、LTO 禁用和编译器缓存的理论估算）。
 
+## 常见问题 | FAQ
+
+### 为什么 shadow-tls 体积不大却编译很久？
+
+- shadow-tls 本身代码量不多，但依赖链很重：主要依赖 `ring`，而 `ring` 会内置构建 BoringSSL/汇编优化代码，跨架构交叉编译时会完整编译一遍。
+- Rust 交叉编译会同时构建目标架构的标准库和所有依赖的 release 版本，首次构建需要下载/编译完整的 crate 栈。
+- 本仓库已启用 sccache、增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建会显著加速（命中缓存后通常缩短到几分钟级别）。
+
 ## License
 
 遵循上游仓库 LICENSE。感谢 [Openwrt-Passwall](https://github.com/Openwrt-Passwall/openwrt-passwall)。
