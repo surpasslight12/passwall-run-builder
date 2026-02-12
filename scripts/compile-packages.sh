@@ -30,6 +30,10 @@ if command -v sccache >/dev/null 2>&1; then
   fi
 fi
 
+log_info "RUSTFLAGS=$RUSTFLAGS"
+log_info "CARGO_INCREMENTAL=$CARGO_INCREMENTAL"
+log_info "CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
+log_info "RUSTC_WRAPPER=${RUSTC_WRAPPER:-<not set>}"
 
 # ── 包分组 / Package groups ──
 C_PKGS=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
@@ -37,18 +41,14 @@ GO_PKGS=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
 RUST_PKGS=(shadow-tls shadowsocks-rust)
 PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
-C_TIMEOUT_MIN=${C_TIMEOUT_MIN:-30}
-GO_TIMEOUT_MIN=${GO_TIMEOUT_MIN:-30}
-RUST_TIMEOUT_MIN=${RUST_TIMEOUT_MIN:-60}
-PRE_TIMEOUT_MIN=${PRE_TIMEOUT_MIN:-30}
-
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
 
 # ── 编译一组包 / Build a group ──
-# Usage: build_group <label> <timeout_minutes> <package1> [package2...]
+# Usage: build_group <label> <package1> [package2...]
 build_group() {
-  local label="$1" timeout_min="$2"; shift 2
-  local ok=0 fail=0 t0; t0=$(date +%s)
+  local label="$1"; shift
+  local ok=0 fail=0 t0 total_pkgs=$#
+  t0=$(date +%s)
 
   add_timing() {
     local group_label="$1" name="$2" status="$3" duration="$4"
@@ -58,26 +58,28 @@ build_group() {
     PKG_TIMINGS+="${group_label}|${name}|${status}|${display_time}"$'\n'
   }
 
-  group_start "Build $label"
+  group_start "Build $label (${total_pkgs} packages)"
+  local idx=0
   for pkg in "$@"; do
+    idx=$((idx + 1))
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
-      log_warn "Package not found: $pkg"
+      log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
       fail=$((fail + 1))
       FAILED_LIST="$FAILED_LIST $pkg"
       status="missing"
-      # Track missing packages to surface skipped items in the summary
       add_timing "$label" "$pkg" "$status" "N/A"
       continue
     fi
+    log_info "[$label ${idx}/${total_pkgs}] Building $pkg …"
     pkg_t0=$(date +%s)
-    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
+    if make_pkg "${pkg_path}/compile" "$pkg"; then
       ok=$((ok + 1))
       status="ok"
     else
-      log_warn "Skipping failed package: $pkg"
+      log_warn "[$label ${idx}/${total_pkgs}] Skipping failed package: $pkg"
       fail=$((fail + 1))
       FAILED_LIST="$FAILED_LIST $pkg"
       status="failed"
@@ -85,7 +87,7 @@ build_group() {
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
     add_timing "$label" "$pkg" "$status" "$pkg_dur"
   done
-  log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
+  log_info "$label complete: $ok OK, $fail failed, total $(($(date +%s) - t0))s"
   group_end
 
   TOTAL_OK=$((TOTAL_OK + ok))
@@ -95,10 +97,10 @@ build_group() {
 # ── 开始编译 / Start ──
 check_disk_space 10
 
-build_group "Rust"     "$RUST_TIMEOUT_MIN" "${RUST_PKGS[@]}"
-build_group "Go"       "$GO_TIMEOUT_MIN" "${GO_PKGS[@]}"
-build_group "C/C++"    "$C_TIMEOUT_MIN" "${C_PKGS[@]}"
-build_group "Prebuilt" "$PRE_TIMEOUT_MIN" "${PRE_PKGS[@]}"
+build_group "Rust"     "${RUST_PKGS[@]}"
+build_group "Go"       "${GO_PKGS[@]}"
+build_group "C/C++"    "${C_PKGS[@]}"
+build_group "Prebuilt" "${PRE_PKGS[@]}"
 
 log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
 [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
@@ -131,7 +133,7 @@ MAX_FAILURES=${MAX_ALLOWED_FAILURES:-5}
 
 # ── 编译主包 / Compile main package ──
 group_start "Compile luci-app-passwall"
-make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" 30 \
+make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" \
   || die "Failed to compile luci-app-passwall"
 group_end
 
