@@ -78,9 +78,12 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - **sccache**: 编译器缓存，避免重复编译相同代码
 - **增量编译**: 启用 `CARGO_INCREMENTAL=1`
 - **并行代码生成**: `-C codegen-units=16` 在编译速度和运行时性能间取得平衡
-- **超时优化**: Rust 组件编译超时从 45 分钟降至 35 分钟
+- **禁用 LTO**: `-C lto=off` 显著加速编译，适合快速迭代
+- **优化级别**: `-C opt-level=2` 在编译速度和运行时性能间平衡
+- **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
+- **超时配置**: Rust 组件编译超时设置为 60 分钟，可通过 `RUST_TIMEOUT_MIN` 环境变量调整
 
-首次构建预计提速 **10-15%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成和编译器缓存的理论估算）。
+首次构建预计提速 **20-30%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成、LTO 禁用和编译器缓存的理论估算）。
 
 ## License
 
