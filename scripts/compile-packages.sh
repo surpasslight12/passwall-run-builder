@@ -66,15 +66,14 @@ build_group() {
       # Track missing packages to surface skipped items in the summary
       add_timing "$pkg" "$status" 0
       continue
+    fi
+    pkg_t0=$(date +%s)
+    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
+      ok=$((ok + 1))
+      status="ok"
     else
-      pkg_t0=$(date +%s)
-      if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
-        ok=$((ok + 1))
-        status="ok"
-      else
-        log_warn "Skipping failed package: $pkg"
-        fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
-      fi
+      log_warn "Skipping failed package: $pkg"
+      fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
     add_timing "$pkg" "$status" "$pkg_dur"
