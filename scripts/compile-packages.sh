@@ -52,7 +52,9 @@ build_group() {
 
   add_timing() {
     local name="$1" status="$2" duration="$3"
-    log_info "$name finished in ${duration}s ($status)"
+    local display_time="$duration"
+    [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
+    log_info "$name finished in ${display_time} ($status)"
     PKG_TIMINGS+="${label}|${name}|${status}|${duration}"$'\n'
   }
 
@@ -64,7 +66,7 @@ build_group() {
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
       # Track missing packages to surface skipped items in the summary
-      add_timing "$pkg" "$status" 0
+      add_timing "$pkg" "$status" "N/A"
       continue
     fi
     pkg_t0=$(date +%s)
