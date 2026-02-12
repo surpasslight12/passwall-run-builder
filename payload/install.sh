@@ -12,9 +12,9 @@ retry() {
   local max="$1" delay="$2"; shift 2
   local i=1
   while [ "$i" -le "$max" ]; do
-    log "Attempt $i/$max: $1"
+    log "Attempt $i/$max: $*"
     "$@" && return 0
-    [ "$i" -eq "$max" ] && { err "Failed after $max attempts: $1"; return 1; }
+    [ "$i" -eq "$max" ] && { err "Failed after $max attempts: $*"; return 1; }
     log_warn "Attempt $i failed, retrying in ${delay}s…"
     sleep "$delay"; i=$((i + 1))
   done

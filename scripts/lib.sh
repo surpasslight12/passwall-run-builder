@@ -24,6 +24,10 @@ step_start() {
   log_info "── $_STEP_NAME ──"
 }
 step_end() {
+  if [ -z "$_STEP_T0" ]; then
+    log_warn "step_end called without step_start"
+    return
+  fi
   local dur=$(( $(date +%s) - _STEP_T0 ))
   log_info "── $_STEP_NAME done (${dur}s) ──"
   _STEP_NAME="" _STEP_T0=""
