@@ -59,12 +59,15 @@ build_group() {
   group_start "Build $label"
   for pkg in "$@"; do
     local pkg_path="" status="ok" pkg_t0 pkg_dur
-    pkg_t0=$(date +%s)
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
+      # Track missing packages to surface skipped items in the summary
+      add_timing "$pkg" "$status" 0
+      continue
     else
+      pkg_t0=$(date +%s)
       if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
         ok=$((ok + 1))
         status="ok"
