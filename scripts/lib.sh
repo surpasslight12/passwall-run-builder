@@ -15,6 +15,24 @@ die()       { log_error "$@"; exit 1; }
 group_start() { echo "::group::$*"; }
 group_end()   { echo "::endgroup::"; }
 
+# ── 步骤计时 / Step timing ──
+# Usage: step_start "Step name"  … work …  step_end
+_STEP_NAME="" _STEP_T0=""
+step_start() {
+  _STEP_NAME="$1"
+  _STEP_T0=$(date +%s)
+  log_info "── $_STEP_NAME ──"
+}
+step_end() {
+  if [ -z "$_STEP_T0" ]; then
+    log_warn "step_end called without step_start"
+    return
+  fi
+  local dur=$(( $(date +%s) - _STEP_T0 ))
+  log_info "── $_STEP_NAME done (${dur}s) ──"
+  _STEP_NAME="" _STEP_T0=""
+}
+
 # ── 重试 / Retry ──
 # Usage: retry <max_attempts> <delay_sec> <command…>
 retry() {

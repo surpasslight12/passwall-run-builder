@@ -140,6 +140,16 @@ jobs:
       - name: Diagnostics
         if: always()
         run: |
+          source scripts/lib.sh
+          log_info "Go: $(go version 2>/dev/null || echo N/A)"
+          log_info "Rust: $(rustc --version 2>/dev/null || echo N/A)"
+          log_info "Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+          log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
+          if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
+            log_info "Installer: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
+          else
+            log_warn "Installer: not built"
+          fi
           {
             echo "### Build Info"
             echo "- Go: $(go version 2>/dev/null || echo N/A)"

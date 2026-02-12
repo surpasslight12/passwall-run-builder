@@ -3,6 +3,8 @@
 # Download/restore OpenWrt SDK and replace bundled Go
 source "$(dirname "$0")/lib.sh"
 
+step_start "Setup SDK"
+
 : "${OPENWRT_SDK_URL:?OPENWRT_SDK_URL not set}"
 SDK_CACHE_HIT="${1:-false}"
 
@@ -23,6 +25,7 @@ else
   case "$SDK_FILE" in
     *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
     *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
+    *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
     *)         die "Unsupported archive: $SDK_FILE" ;;
   esac
   rm -f "$SDK_FILE"
@@ -49,3 +52,5 @@ else
   log_warn "System Go not found, skipping SDK Go replacement"
 fi
 group_end
+
+step_end

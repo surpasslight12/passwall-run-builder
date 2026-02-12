@@ -3,6 +3,8 @@
 # Collect built APKs into payload directory
 source "$(dirname "$0")/lib.sh"
 
+step_start "Collect packages"
+
 cd openwrt-sdk
 
 PAYLOAD="${GITHUB_WORKSPACE:-.}/payload"
@@ -18,7 +20,7 @@ collect_pkg() {
   done < <(find bin/packages -type f \( -name "${prefix}-*.apk" -o -name "${prefix}_*.apk" \) -print0)
   [ -n "$best" ] || return 1
   cp "$best" "$dest/"
-  log_info "  $prefix → $(basename "$best")"
+  log_info "Collected $prefix → $(basename "$best")"
 }
 
 # ── 收集主包 / Collect main packages ──
@@ -55,8 +57,9 @@ group_end
 # ── 校验 / Validate ──
 group_start "Validate payload"
 DEP_COUNT=$(find "$DEPENDS" -name "*.apk" | wc -l)
+MIN_DEPS=${MIN_REQUIRED_PACKAGES:-10}
 [ "$DEP_COUNT" -eq 0 ] && die "No dependency APKs found"
-[ "$DEP_COUNT" -lt 10 ] && log_warn "Only $DEP_COUNT packages (expected ≥10)"
+[ "$DEP_COUNT" -lt "$MIN_DEPS" ] && log_warn "Only $DEP_COUNT packages (expected ≥$MIN_DEPS)"
 
 [ -f "$PAYLOAD/install.sh" ] || die "install.sh missing from payload"
 
@@ -67,3 +70,5 @@ find "$PAYLOAD" -maxdepth 1 -type f \
 
 log_info "Payload OK: $DEP_COUNT deps"
 group_end
+
+step_end

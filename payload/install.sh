@@ -3,16 +3,19 @@
 # PassWall installer for OpenWrt (APK package manager)
 set -e
 
-log()  { printf '[INFO]  %s\n' "$*"; }
-err()  { printf '[ERROR] %s\n' "$*" >&2; }
-die()  { err "$@"; exit 1; }
+log()      { printf '[INFO]  %s\n' "$*"; }
+log_warn() { printf '[WARN]  %s\n' "$*"; }
+err()      { printf '[ERROR] %s\n' "$*" >&2; }
+die()      { err "$@"; exit 1; }
 
 retry() {
   local max="$1" delay="$2"; shift 2
   local i=1
   while [ "$i" -le "$max" ]; do
+    log "Attempt $i/$max: $*"
     "$@" && return 0
-    [ "$i" -eq "$max" ] && return 1
+    [ "$i" -eq "$max" ] && { err "Failed after $max attempts: $*"; return 1; }
+    log_warn "Attempt $i failed, retrying in ${delay}s…"
     sleep "$delay"; i=$((i + 1))
   done
 }
@@ -50,9 +53,11 @@ fi
 
 set -- "$@" haproxy
 
-# ── 卸载旧版本 / Remove old version if same ──
-if apk list -I luci-app-passwall 2>/dev/null | grep -q "$pw_ver"; then
-  log "Same version detected, removing first"
+# ── 卸载旧版本 / Remove old version ──
+if apk list -I luci-app-passwall 2>/dev/null | grep -q "luci-app-passwall"; then
+  INSTALLED_VER=$(apk list -I luci-app-passwall 2>/dev/null | sed -E 's/.*-([0-9][^ ]*).*/\1/' | head -1)
+  log "Installed version: ${INSTALLED_VER:-unknown}, new version: $pw_ver"
+  log "Removing existing PassWall before install"
   apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>/dev/null || true
 fi
 
