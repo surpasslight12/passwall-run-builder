@@ -51,12 +51,12 @@ build_group() {
   local ok=0 fail=0 t0; t0=$(date +%s)
 
   add_timing() {
-    local status="$1" duration="$2"
-    log_info "$pkg finished in ${duration}s ($status)"
+    local name="$1" status="$2" duration="$3"
+    log_info "$name finished in ${duration}s ($status)"
     if [ -n "$PKG_TIMINGS" ]; then
-      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${duration}")
+      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${name}|${status}|${duration}")
     else
-      PKG_TIMINGS="${label}|${pkg}|${status}|${duration}"
+      PKG_TIMINGS="${label}|${name}|${status}|${duration}"
     fi
   }
 
@@ -69,7 +69,7 @@ build_group() {
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
       pkg_dur=$(( $(date +%s) - pkg_t0 ))
-      add_timing "$status" "$pkg_dur"
+      add_timing "$pkg" "$status" "$pkg_dur"
       continue
     fi
     if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
@@ -80,7 +80,7 @@ build_group() {
       fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
-    add_timing "$status" "$pkg_dur"
+    add_timing "$pkg" "$status" "$pkg_dur"
   done
   log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
   group_end
@@ -141,7 +141,7 @@ if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     {
       echo "### sccache statistics"
-      echo '```'
+      echo '```text'
       printf '%s\n' "$SCCACHE_STATS"
       echo '```'
     } >> "$GITHUB_STEP_SUMMARY"
