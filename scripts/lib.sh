@@ -31,38 +31,25 @@ retry() {
 }
 
 # ── Make 封装：并行 → 单线程降级 / Make wrapper with fallback ──
-# Usage: make_pkg <target> [label] [timeout_minutes]
+# Usage: make_pkg <target> [label]
 make_pkg() {
-  local target="$1" label="${2:-$1}" timeout_min="${3:-60}"
+  local target="$1" label="${2:-$1}"
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-${label//\//_}-$$.log"
-  local timeout_sec exit_code=0
+  local exit_code=0
 
-  # Validate timeout
-  if ! [[ "$timeout_min" =~ ^[0-9]+$ ]] || [[ "$timeout_min" -le 0 ]]; then
-    log_error "Invalid timeout: $timeout_min (must be positive integer)"
-    return 1
-  fi
-  timeout_sec=$((timeout_min * 60))
-
-  log_info "Compiling $label (-j$jobs, timeout: ${timeout_min}m)"
-  timeout "$timeout_sec" make "$target" -j"$jobs" V=s >"$logfile" 2>&1
+  log_info "Compiling $label (-j$jobs)"
+  make "$target" -j"$jobs" V=s >"$logfile" 2>&1
   exit_code=$?
   if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
-  elif [ $exit_code -eq 124 ]; then
-    log_error "Build timeout: $label (exceeded ${timeout_min}m)"
-    rm -f "$logfile"; return 1
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  timeout "$timeout_sec" make "$target" -j1 V=s >"$logfile" 2>&1
+  make "$target" -j1 V=s >"$logfile" 2>&1
   exit_code=$?
   if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
-  elif [ $exit_code -eq 124 ]; then
-    log_error "Build timeout: $label (exceeded ${timeout_min}m)"
-    rm -f "$logfile"; return 1
   fi
 
   log_error "Build failed: $label"
