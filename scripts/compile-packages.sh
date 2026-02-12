@@ -50,6 +50,16 @@ build_group() {
   local label="$1" timeout_min="$2"; shift 2
   local ok=0 fail=0 t0; t0=$(date +%s)
 
+  add_timing() {
+    local status="$1" duration="$2"
+    log_info "$pkg finished in ${duration}s ($status)"
+    if [ -n "$PKG_TIMINGS" ]; then
+      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${duration}")
+    else
+      PKG_TIMINGS="${label}|${pkg}|${status}|${duration}"
+    fi
+  }
+
   group_start "Build $label"
   for pkg in "$@"; do
     local pkg_path="" status="ok" pkg_t0 pkg_dur
@@ -59,14 +69,10 @@ build_group() {
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
       pkg_dur=$(( $(date +%s) - pkg_t0 ))
-      log_info "$pkg finished in ${pkg_dur}s ($status)"
-      if [ -n "$PKG_TIMINGS" ]; then
-        PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${pkg_dur}")
-      else
-        PKG_TIMINGS="${label}|${pkg}|${status}|${pkg_dur}"
-      fi
+      add_timing "$status" "$pkg_dur"
       continue
-    elif make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
+    fi
+    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
       ok=$((ok + 1))
       status="ok"
     else
@@ -74,12 +80,7 @@ build_group() {
       fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
-    log_info "$pkg finished in ${pkg_dur}s ($status)"
-    if [ -n "$PKG_TIMINGS" ]; then
-      PKG_TIMINGS=$(printf "%s\n%s" "$PKG_TIMINGS" "${label}|${pkg}|${status}|${pkg_dur}")
-    else
-      PKG_TIMINGS="${label}|${pkg}|${status}|${pkg_dur}"
-    fi
+    add_timing "$status" "$pkg_dur"
   done
   log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
   group_end
