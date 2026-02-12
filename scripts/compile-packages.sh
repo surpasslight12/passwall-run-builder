@@ -111,7 +111,11 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       echo "| --- | --- | --- | --- |"
       while IFS='|' read -r group pkg status sec; do
         [ -z "$group" ] && continue
-        echo "| $group | $pkg | $status | ${sec}s |"
+        if [[ "$sec" =~ ^[0-9]+$ ]]; then
+          echo "| $group | $pkg | $status | ${sec}s |"
+        else
+          echo "| $group | $pkg | $status | $sec |"
+        fi
       done <<EOF
 $PKG_TIMINGS
 EOF
