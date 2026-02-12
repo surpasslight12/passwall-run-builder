@@ -51,11 +51,11 @@ build_group() {
   local ok=0 fail=0 t0; t0=$(date +%s)
 
   add_timing() {
-    local name="$1" status="$2" duration="$3"
+    local group_label="$1" name="$2" status="$3" duration="$4"
     local display_time="$duration"
     [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
     log_info "$name finished in ${display_time} ($status)"
-    PKG_TIMINGS+="${label}|${name}|${status}|${display_time}"$'\n'
+    PKG_TIMINGS+="${group_label}|${name}|${status}|${display_time}"$'\n'
   }
 
   group_start "Build $label"
@@ -64,9 +64,12 @@ build_group() {
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
-      log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
+      log_warn "Package not found: $pkg"
+      fail=$((fail + 1))
+      FAILED_LIST="$FAILED_LIST $pkg"
+      status="missing"
       # Track missing packages to surface skipped items in the summary
-      add_timing "$pkg" "$status" "N/A"
+      add_timing "$label" "$pkg" "$status" "N/A"
       continue
     fi
     pkg_t0=$(date +%s)
@@ -75,10 +78,12 @@ build_group() {
       status="ok"
     else
       log_warn "Skipping failed package: $pkg"
-      fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
+      fail=$((fail + 1))
+      FAILED_LIST="$FAILED_LIST $pkg"
+      status="failed"
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
-    add_timing "$pkg" "$status" "$pkg_dur"
+    add_timing "$label" "$pkg" "$status" "$pkg_dur"
   done
   log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
   group_end
