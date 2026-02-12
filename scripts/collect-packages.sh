@@ -55,8 +55,9 @@ group_end
 # ── 校验 / Validate ──
 group_start "Validate payload"
 DEP_COUNT=$(find "$DEPENDS" -name "*.apk" | wc -l)
+MIN_DEPS=${MIN_REQUIRED_PACKAGES:-10}
 [ "$DEP_COUNT" -eq 0 ] && die "No dependency APKs found"
-[ "$DEP_COUNT" -lt 10 ] && log_warn "Only $DEP_COUNT packages (expected ≥10)"
+[ "$DEP_COUNT" -lt "$MIN_DEPS" ] && log_warn "Only $DEP_COUNT packages (expected ≥$MIN_DEPS)"
 
 [ -f "$PAYLOAD/install.sh" ] || die "install.sh missing from payload"
 

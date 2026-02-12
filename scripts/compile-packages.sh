@@ -65,6 +65,11 @@ build_group() {
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
+    [ -z "$pkg_path" ] && {
+      local feeds_match
+      feeds_match=$(find package/feeds -maxdepth 2 -type l -name "$pkg" 2>/dev/null | head -1)
+      [ -n "$feeds_match" ] && pkg_path="$feeds_match"
+    }
     if [ -z "$pkg_path" ]; then
       log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
       fail=$((fail + 1))

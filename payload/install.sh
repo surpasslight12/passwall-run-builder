@@ -50,9 +50,11 @@ fi
 
 set -- "$@" haproxy
 
-# ── 卸载旧版本 / Remove old version if same ──
-if apk list -I luci-app-passwall 2>/dev/null | grep -q "$pw_ver"; then
-  log "Same version detected, removing first"
+# ── 卸载旧版本 / Remove old version ──
+if apk list -I luci-app-passwall 2>/dev/null | grep -q "luci-app-passwall"; then
+  INSTALLED_VER=$(apk list -I luci-app-passwall 2>/dev/null | sed -E 's/.*-([0-9][^ ]*).*/\1/' | head -1)
+  log "Installed version: ${INSTALLED_VER:-unknown}, new version: $pw_ver"
+  log "Removing existing PassWall before install"
   apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>/dev/null || true
 fi
 

@@ -23,6 +23,7 @@ else
   case "$SDK_FILE" in
     *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
     *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
+    *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
     *)         die "Unsupported archive: $SDK_FILE" ;;
   esac
   rm -f "$SDK_FILE"
