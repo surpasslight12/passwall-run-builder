@@ -53,8 +53,7 @@ build_group() {
   add_timing() {
     local name="$1" status="$2" duration="$3"
     log_info "$name finished in ${duration}s ($status)"
-    PKG_TIMINGS+="${label}|${name}|${status}|${duration}
-"
+    PKG_TIMINGS+="${label}|${name}|${status}|${duration}"$'\n'
   }
 
   group_start "Build $label"
@@ -65,16 +64,14 @@ build_group() {
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
       log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
-      pkg_dur=$(( $(date +%s) - pkg_t0 ))
-      add_timing "$pkg" "$status" "$pkg_dur"
-      continue
-    fi
-    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
-      ok=$((ok + 1))
-      status="ok"
     else
-      log_warn "Skipping failed package: $pkg"
-      fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
+      if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
+        ok=$((ok + 1))
+        status="ok"
+      else
+        log_warn "Skipping failed package: $pkg"
+        fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
+      fi
     fi
     pkg_dur=$(( $(date +%s) - pkg_t0 ))
     add_timing "$pkg" "$status" "$pkg_dur"
