@@ -42,7 +42,7 @@ GO_TIMEOUT_MIN=${GO_TIMEOUT_MIN:-30}
 RUST_TIMEOUT_MIN=${RUST_TIMEOUT_MIN:-60}
 PRE_TIMEOUT_MIN=${PRE_TIMEOUT_MIN:-30}
 
-TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST=""
+TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
 
 # ── 编译一组包 / Build a group ──
 # Usage: build_group <label> <timeout_minutes> <package1> [package2...]
@@ -52,19 +52,22 @@ build_group() {
 
   group_start "Build $label"
   for pkg in "$@"; do
-    local pkg_path=""
+    local pkg_path="" status="ok" pkg_t0 pkg_dur
+    pkg_t0=$(date +%s)
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
     if [ -z "$pkg_path" ]; then
-      log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; continue
-    fi
-
-    if make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
+      log_warn "Package not found: $pkg"; fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="missing"
+    elif make_pkg "${pkg_path}/compile" "$pkg" "$timeout_min"; then
       ok=$((ok + 1))
+      status="ok"
     else
       log_warn "Skipping failed package: $pkg"
-      fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"
+      fail=$((fail + 1)); FAILED_LIST="$FAILED_LIST $pkg"; status="failed"
     fi
+    pkg_dur=$(( $(date +%s) - pkg_t0 ))
+    log_info "$pkg finished in ${pkg_dur}s ($status)"
+    PKG_TIMINGS="${PKG_TIMINGS}${PKG_TIMINGS:+$'\n'}${label}|${pkg}|${status}|${pkg_dur}"
   done
   log_info "$label done: $ok OK, $fail failed ($(($(date +%s) - t0))s)"
   group_end
@@ -91,6 +94,17 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "- **Built**: $TOTAL_OK"
     echo "- **Failed**: $TOTAL_FAIL"
     [ -n "$FAILED_LIST" ] && { echo "### Failed"; for p in $FAILED_LIST; do echo "- \`$p\`"; done; }
+    if [ -n "$PKG_TIMINGS" ]; then
+      echo "### Build Durations"
+      echo "| Group | Package | Status | Time |"
+      echo "| --- | --- | --- | --- |"
+      while IFS='|' read -r group pkg status sec; do
+        [ -z "$group" ] && continue
+        echo "| $group | $pkg | $status | ${sec}s |"
+      done <<EOF
+$PKG_TIMINGS
+EOF
+    fi
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 
@@ -108,8 +122,15 @@ group_end
 # ── sccache 统计 / sccache statistics ──
 if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
   group_start "sccache statistics"
-  sccache --show-stats || true
+  SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
+  printf '%s\n' "$SCCACHE_STATS"
   group_end
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    {
+      echo "### sccache statistics"
+      printf '%s\n' "$SCCACHE_STATS"
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
 fi
 
 log_info "Compilation complete: $TOTAL_OK deps + luci-app-passwall"
