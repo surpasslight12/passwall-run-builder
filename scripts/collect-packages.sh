@@ -3,6 +3,8 @@
 # Collect built APKs into payload directory
 source "$(dirname "$0")/lib.sh"
 
+step_start "Collect packages"
+
 cd openwrt-sdk
 
 PAYLOAD="${GITHUB_WORKSPACE:-.}/payload"
@@ -18,7 +20,7 @@ collect_pkg() {
   done < <(find bin/packages -type f \( -name "${prefix}-*.apk" -o -name "${prefix}_*.apk" \) -print0)
   [ -n "$best" ] || return 1
   cp "$best" "$dest/"
-  log_info "  $prefix → $(basename "$best")"
+  log_info "Collected $prefix → $(basename "$best")"
 }
 
 # ── 收集主包 / Collect main packages ──
@@ -68,3 +70,5 @@ find "$PAYLOAD" -maxdepth 1 -type f \
 
 log_info "Payload OK: $DEP_COUNT deps"
 group_end
+
+step_end

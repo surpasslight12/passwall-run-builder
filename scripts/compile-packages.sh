@@ -3,6 +3,8 @@
 # Compile PassWall packages grouped by toolchain
 source "$(dirname "$0")/lib.sh"
 
+step_start "Compile packages"
+
 cd openwrt-sdk
 export FORCE_UNSAFE_CONFIGURE=1
 export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
@@ -114,25 +116,27 @@ log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
 [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
 
 # 写入摘要 / Write summary
-if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-  {
-    echo "## Build Summary"
-    echo "- **Built**: $TOTAL_OK"
-    echo "- **Failed**: $TOTAL_FAIL"
-    [ -n "$FAILED_LIST" ] && { echo "### Failed"; for p in $FAILED_LIST; do echo "- \`$p\`"; done; }
-    if [ -n "$PKG_TIMINGS" ]; then
-      echo "### Build Durations"
-      echo "| Group | Package | Status | Time |"
-      echo "| --- | --- | --- | --- |"
-      while IFS='|' read -r group pkg status sec; do
-        [ -z "$group" ] && continue
-        echo "| $group | $pkg | $status | $sec |"
-      done <<EOF
+{
+  SUMMARY="## Build Summary"$'\n'
+  SUMMARY+="- **Built**: $TOTAL_OK"$'\n'
+  SUMMARY+="- **Failed**: $TOTAL_FAIL"$'\n'
+  if [ -n "$FAILED_LIST" ]; then
+    SUMMARY+="### Failed"$'\n'
+    for p in $FAILED_LIST; do SUMMARY+="- \`$p\`"$'\n'; done
+  fi
+  if [ -n "$PKG_TIMINGS" ]; then
+    SUMMARY+="### Build Durations"$'\n'
+    SUMMARY+="| Group | Package | Status | Time |"$'\n'
+    SUMMARY+="| --- | --- | --- | --- |"$'\n'
+    while IFS='|' read -r group pkg status sec; do
+      [ -z "$group" ] && continue
+      SUMMARY+="| $group | $pkg | $status | $sec |"$'\n'
+    done <<EOF
 $PKG_TIMINGS
 EOF
-    fi
-  } >> "$GITHUB_STEP_SUMMARY"
-fi
+  fi
+  gh_summary "$SUMMARY"
+}
 
 MIN_REQUIRED=${MIN_REQUIRED_PACKAGES:-15}
 MAX_FAILURES=${MAX_ALLOWED_FAILURES:-5}
@@ -149,16 +153,12 @@ group_end
 if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
   group_start "sccache statistics"
   SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
+  log_info "sccache stats:"
   printf '%s\n' "$SCCACHE_STATS"
   group_end
-  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-    {
-      echo "### sccache statistics"
-      echo '```text'
-      printf '%s\n' "$SCCACHE_STATS"
-      echo '```'
-    } >> "$GITHUB_STEP_SUMMARY"
-  fi
+  gh_summary "### sccache statistics"$'\n'"\`\`\`text"$'\n'"$SCCACHE_STATS"$'\n'"\`\`\`"
 fi
 
 log_info "Compilation complete: $TOTAL_OK deps + luci-app-passwall"
+
+step_end

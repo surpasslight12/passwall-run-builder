@@ -4,6 +4,8 @@
 SCRIPT_DIR="$(dirname "$0")"
 source "$SCRIPT_DIR/lib.sh"
 
+step_start "Configure feeds"
+
 cd openwrt-sdk
 FEEDS_CACHED="${1:-false}"
 
@@ -143,3 +145,5 @@ for path in scripts/feeds staging_dir Makefile package/passwall-packages package
 done
 log_info "Validation passed"
 group_end
+
+step_end

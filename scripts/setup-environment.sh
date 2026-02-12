@@ -3,6 +3,7 @@
 # Free disk space and install build dependencies
 source "$(dirname "$0")/lib.sh"
 
+step_start "Setup environment"
 export DEBIAN_FRONTEND=noninteractive
 
 group_start "Free disk space"
@@ -26,3 +27,5 @@ sudo apt-get install -y -qq \
   || die "apt-get install failed"
 log_info "Build dependencies installed"
 group_end
+
+step_end

@@ -3,6 +3,8 @@
 # Install Go and Rust toolchains
 source "$(dirname "$0")/lib.sh"
 
+step_start "Install toolchains"
+
 # ── Go ──
 group_start "Install Go"
 
@@ -53,3 +55,5 @@ else
 fi
 
 group_end
+
+step_end

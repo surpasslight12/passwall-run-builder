@@ -3,6 +3,8 @@
 # Build self-extracting .run installer with makeself
 source "$(dirname "$0")/lib.sh"
 
+step_start "Build installer"
+
 : "${OPENWRT_SDK_URL:?OPENWRT_SDK_URL not set}"
 
 group_start "Build installer"
@@ -40,9 +42,11 @@ group_end
 
 # ── 校验 / Verify ──
 group_start "Verify installer"
-file "$RUN_NAME"
+log_info "$(file "$RUN_NAME")"
 sh "$RUN_NAME" --check || die "Integrity check failed"
 log_info "OK — $(du -h "$RUN_NAME" | cut -f1)"
 group_end
 
 gh_set_env "RUN_NAME" "$RUN_NAME"
+
+step_end

@@ -3,16 +3,19 @@
 # PassWall installer for OpenWrt (APK package manager)
 set -e
 
-log()  { printf '[INFO]  %s\n' "$*"; }
-err()  { printf '[ERROR] %s\n' "$*" >&2; }
-die()  { err "$@"; exit 1; }
+log()      { printf '[INFO]  %s\n' "$*"; }
+log_warn() { printf '[WARN]  %s\n' "$*"; }
+err()      { printf '[ERROR] %s\n' "$*" >&2; }
+die()      { err "$@"; exit 1; }
 
 retry() {
   local max="$1" delay="$2"; shift 2
   local i=1
   while [ "$i" -le "$max" ]; do
+    log "Attempt $i/$max: $1"
     "$@" && return 0
-    [ "$i" -eq "$max" ] && return 1
+    [ "$i" -eq "$max" ] && { err "Failed after $max attempts: $1"; return 1; }
+    log_warn "Attempt $i failed, retrying in ${delay}s…"
     sleep "$delay"; i=$((i + 1))
   done
 }
