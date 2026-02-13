@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 jobs:
@@ -69,7 +70,27 @@ jobs:
             }
 
       - name: Summary
+        if: always()
         run: |
           echo "- Upstream tag: \`${{ steps.upstream.outputs.upstream_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Synced local tag: \`${{ steps.upstream.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Created new tag: \`${{ steps.upstream.outputs.created }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger build workflow
+        if: steps.upstream.outputs.created == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { owner, repo } = context.repo
+            const tag = '${{ steps.upstream.outputs.tag }}'
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'build-installer.yml',
+              ref: `refs/tags/${tag}`,
+              inputs: {
+                use_cache: 'true'
+              }
+            })
+            core.info(`Triggered build-installer.yml on tag ${tag}.`)
