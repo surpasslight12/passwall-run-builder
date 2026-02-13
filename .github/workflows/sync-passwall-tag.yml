@@ -20,8 +20,13 @@ jobs:
         id: upstream
         run: |
           set -euo pipefail
-          tag=$(curl -fsSL https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
-          [ -n "$tag" ] || { echo "::error::Failed to get upstream tag"; exit 1; }
+          if ! tag=$(curl -fsSL \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest | jq -r '.tag_name // empty'); then
+            echo "::error::Failed to request upstream release API"
+            exit 1
+          fi
+          [ -n "$tag" ] || { echo "::error::Upstream latest stable tag is empty"; exit 1; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag when new
