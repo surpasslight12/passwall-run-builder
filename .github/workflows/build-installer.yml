@@ -47,7 +47,7 @@ jobs:
       - name: Cache SDK
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-sdk
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: openwrt-sdk
           key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cfg.outputs.sdk-hash }}
@@ -55,7 +55,8 @@ jobs:
 
       - name: Cache Go modules
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        uses: actions/cache@v4
+        id: cache-go
+        uses: actions/cache/restore@v4
         with:
           path: openwrt-sdk/dl/go-mod-cache
           key: ${{ env.CACHE_VERSION }}-go-${{ steps.cfg.outputs.week }}
@@ -63,7 +64,8 @@ jobs:
 
       - name: Cache Rust/Cargo
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        uses: actions/cache@v4
+        id: cache-rust
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
@@ -75,7 +77,8 @@ jobs:
 
       - name: Cache sccache
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        uses: actions/cache@v4
+        id: cache-sccache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/sccache
           key: ${{ env.CACHE_VERSION }}-sccache-${{ steps.cfg.outputs.week }}
@@ -84,7 +87,7 @@ jobs:
       - name: Cache feeds
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-feeds
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             openwrt-sdk/feeds
@@ -113,6 +116,47 @@ jobs:
 
       - name: Build installer
         run: scripts/build-installer.sh
+
+      - name: Save SDK cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sdk.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: openwrt-sdk
+          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cfg.outputs.sdk-hash }}
+
+      - name: Save Go modules cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-go.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: openwrt-sdk/dl/go-mod-cache
+          key: ${{ env.CACHE_VERSION }}-go-${{ steps.cfg.outputs.week }}
+
+      - name: Save Rust/Cargo cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-rust.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup
+            openwrt-sdk/dl/rust
+          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
+
+      - name: Save sccache cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sccache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/sccache
+          key: ${{ env.CACHE_VERSION }}-sccache-${{ steps.cfg.outputs.week }}
+
+      - name: Save feeds cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-feeds.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            openwrt-sdk/feeds
+            openwrt-sdk/package/feeds
+          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
 
       # ── Publish ──
       - name: Upload artifact
