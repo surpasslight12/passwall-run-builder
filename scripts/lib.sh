@@ -58,12 +58,12 @@ make_pkg() {
   
   # Build make arguments array with Rust/Cargo environment variables
   local make_args=()
-  [ -n "${RUSTC_WRAPPER:-}" ] && make_args+=("RUSTC_WRAPPER=$RUSTC_WRAPPER")
-  [ -n "${RUSTFLAGS:-}" ] && make_args+=("RUSTFLAGS=$RUSTFLAGS")
-  [ -n "${CARGO_INCREMENTAL:-}" ] && make_args+=("CARGO_INCREMENTAL=$CARGO_INCREMENTAL")
-  [ -n "${CARGO_NET_GIT_FETCH_WITH_CLI:-}" ] && make_args+=("CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI")
-  [ -n "${CARGO_PROFILE_RELEASE_DEBUG:-}" ] && make_args+=("CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG")
-  [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=$SCCACHE_DIR")
+  [ -n "${RUSTC_WRAPPER:-}" ] && make_args+=("RUSTC_WRAPPER=${RUSTC_WRAPPER}")
+  [ -n "${RUSTFLAGS:-}" ] && make_args+=("RUSTFLAGS=${RUSTFLAGS}")
+  [ -n "${CARGO_INCREMENTAL:-}" ] && make_args+=("CARGO_INCREMENTAL=${CARGO_INCREMENTAL}")
+  [ -n "${CARGO_NET_GIT_FETCH_WITH_CLI:-}" ] && make_args+=("CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI}")
+  [ -n "${CARGO_PROFILE_RELEASE_DEBUG:-}" ] && make_args+=("CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG}")
+  [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=${SCCACHE_DIR}")
 
   log_info "Compiling $label (-j$jobs)"
   make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1
