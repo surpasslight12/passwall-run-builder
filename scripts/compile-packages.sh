@@ -45,26 +45,26 @@ RUST_PKGS=(shadow-tls shadowsocks-rust)
 PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
 PKGCONF="$SCRIPT_DIR/../config/packages.conf"
-SELECTED_PKGS=""
+SELECTED_PACKAGES=""
 if [ -f "$PKGCONF" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     [[ "$line" =~ ^[[:space:]]*# ]] && continue
     [[ -z "${line// }" ]] && continue
     [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || continue
-    SELECTED_PKGS+="$line"$'\n'
+    SELECTED_PACKAGES+="$line"$'\n'
   done < "$PKGCONF"
 fi
 
-is_pkg_selected() {
+is_package_selected() {
   local pkg="$1"
-  [ -z "$SELECTED_PKGS" ] && return 0
+  [ -z "$SELECTED_PACKAGES" ] && return 0
   case "$pkg" in
-    shadowsocks-libev)  printf '%s' "$SELECTED_PKGS" | grep -Eq '^shadowsocks-libev(-|$)' ;;
-    shadowsocks-rust)   printf '%s' "$SELECTED_PKGS" | grep -Eq '^shadowsocks-rust(-|$)' ;;
-    shadowsocksr-libev) printf '%s' "$SELECTED_PKGS" | grep -Eq '^shadowsocksr-libev(-|$)' ;;
-    simple-obfs)        printf '%s' "$SELECTED_PKGS" | grep -Eq '^simple-obfs(-|$)' ;;
-    v2ray-geodata)      printf '%s' "$SELECTED_PKGS" | grep -Eq '^v2ray-(geodata|geoip|geosite)$' ;;
-    *)                  printf '%s' "$SELECTED_PKGS" | grep -qx "$pkg" ;;
+    shadowsocks-libev)  printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-libev(-|$)' ;;
+    shadowsocks-rust)   printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-rust(-|$)' ;;
+    shadowsocksr-libev) printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocksr-libev(-|$)' ;;
+    simple-obfs)        printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^simple-obfs(-|$)' ;;
+    v2ray-geodata)      printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^v2ray-(geodata|geoip|geosite)$' ;;
+    *)                  printf '%s' "$SELECTED_PACKAGES" | grep -qx "$pkg" ;;
   esac
 }
 
@@ -86,7 +86,7 @@ build_group() {
   local ok=0 fail=0 t0 total_pkgs=0
   t0=$(date +%s)
   for pkg in "$@"; do
-    is_pkg_selected "$pkg" && total_pkgs=$((total_pkgs + 1))
+    is_package_selected "$pkg" && total_pkgs=$((total_pkgs + 1))
   done
   if [ "$total_pkgs" -eq 0 ]; then
     log_info "No selected packages in $label, skipping"
@@ -105,7 +105,7 @@ build_group() {
 
   local idx=0
   for pkg in "$@"; do
-    is_pkg_selected "$pkg" || continue
+    is_package_selected "$pkg" || continue
     idx=$((idx + 1))
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
