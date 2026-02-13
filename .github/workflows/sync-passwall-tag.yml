@@ -30,12 +30,14 @@ jobs:
               owner: upstreamOwner,
               repo: upstreamRepo
             })
-            const tag = (release.tag_name || '').trim()
-            if (!tag) {
+            const upstreamTag = (release.tag_name || '').trim()
+            if (!upstreamTag) {
               core.setFailed('Upstream latest stable tag is empty')
               return
             }
+            const tag = upstreamTag.replace(/^v/, '')
             core.setOutput('tag', tag)
+            core.setOutput('upstream_tag', upstreamTag)
 
             const shortRef = `tags/${tag}`
             try {
@@ -68,5 +70,6 @@ jobs:
 
       - name: Summary
         run: |
-          echo "- Upstream tag: \`${{ steps.upstream.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Upstream tag: \`${{ steps.upstream.outputs.upstream_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Synced local tag: \`${{ steps.upstream.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Created new tag: \`${{ steps.upstream.outputs.created }}\`" >> "$GITHUB_STEP_SUMMARY"
