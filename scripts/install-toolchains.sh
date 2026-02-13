@@ -43,7 +43,8 @@ fi
 [ -n "${GITHUB_PATH:-}" ] && echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 rustup target list --installed | grep -q x86_64-unknown-linux-musl \
   || rustup target add x86_64-unknown-linux-musl
-rustc --version && cargo --version || die "Rust verification failed"
+rustc --version || die "Rust verification failed"
+cargo --version || die "Cargo verification failed"
 
 # 安装 sccache 用于加速 Rust 编译 / Install sccache for faster Rust builds
 if ! command -v sccache >/dev/null 2>&1; then

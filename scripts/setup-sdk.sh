@@ -14,7 +14,9 @@ if [ "$SDK_CACHE_HIT" = "true" ] && [ -f openwrt-sdk/Makefile ]; then
   rm -rf openwrt-sdk/bin/packages/* openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
 else
   group_start "Download SDK"
-  rm -rf openwrt-sdk && mkdir -p openwrt-sdk && cd openwrt-sdk
+  rm -rf openwrt-sdk
+  mkdir -p openwrt-sdk
+  cd openwrt-sdk || die "Cannot enter openwrt-sdk directory"
 
   SDK_FILE=$(basename "$OPENWRT_SDK_URL")
   log_info "Downloading $SDK_FILE"
@@ -41,13 +43,13 @@ if [ -x "$SYS_GO" ]; then
   GOROOT=$("$SYS_GO" env GOROOT)
   log_info "System Go: $SYS_VER ($GOROOT)"
 
-  for godir in $(find openwrt-sdk/staging_dir -maxdepth 4 -type d \( -name "go-*" -o -name "go" \) 2>/dev/null); do
+  while IFS= read -r -d '' godir; do
     SDK_VER=$("$godir/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
     if [ "$SDK_VER" != "$SYS_VER" ]; then
       log_info "Replacing $godir ($SDK_VER → $SYS_VER)"
       rm -rf "$godir" && cp -a "$GOROOT" "$godir"
     fi
-  done
+  done < <(find openwrt-sdk/staging_dir -maxdepth 4 -type d \( -name "go-*" -o -name "go" \) -print0 2>/dev/null)
 else
   log_warn "System Go not found, skipping SDK Go replacement"
 fi

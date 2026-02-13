@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 step_start "Configure feeds"
 
-cd openwrt-sdk
+cd openwrt-sdk || die "Cannot enter openwrt-sdk directory"
 FEEDS_CACHED="${1:-false}"
 
 # ── 配置 feeds / Configure feeds ──

@@ -12,10 +12,13 @@ group_start "Build installer"
 mkdir -p build/payload
 cp -r payload/* build/payload/
 chmod +x build/payload/install.sh
-cd build
+cd build || die "Cannot enter build directory"
 
 # 从文件名提取版本 / Extract version from filename
-PW_FILE=$(ls payload | grep -E 'luci-app-passwall[-_]' | head -1)
+PW_FILE=""
+for f in payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk; do
+  [ -e "$f" ] && { PW_FILE=$(basename "$f"); break; }
+done
 [ -z "$PW_FILE" ] && die "luci-app-passwall package not found"
 PW_VER=$(echo "$PW_FILE" | sed -E 's/luci-app-passwall[-_]//; s/[-_].*//')
 

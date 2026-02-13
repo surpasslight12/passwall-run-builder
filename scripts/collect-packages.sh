@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib.sh"
 
 step_start "Collect packages"
 
-cd openwrt-sdk
+cd openwrt-sdk || die "Cannot enter openwrt-sdk directory"
 
 PAYLOAD="${GITHUB_WORKSPACE:-.}/payload"
 DEPENDS="$PAYLOAD/depends"

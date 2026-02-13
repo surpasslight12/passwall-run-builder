@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-trap 'rm -f /tmp/build-*.log 2>/dev/null' EXIT
+trap 'rm -f /tmp/build-pkg-*.log 2>/dev/null' EXIT
 
 # ── 日志 / Logging ──
 log_info()  { printf '[INFO]  %s\n' "$*"; }
@@ -53,8 +53,7 @@ retry() {
 make_pkg() {
   local target="$1" label="${2:-$1}"
   local jobs; jobs=$(nproc)
-  local logfile="/tmp/build-${label//\//_}-$$.log"
-  local exit_code=0
+  local logfile="/tmp/build-pkg-${label//\//_}-$$.log"
   
   # Build make arguments array with Rust/Cargo environment variables
   local make_args=()
@@ -66,16 +65,12 @@ make_pkg() {
   [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=${SCCACHE_DIR}")
 
   log_info "Compiling $label (-j$jobs)"
-  make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1
-  exit_code=$?
-  if [ $exit_code -eq 0 ]; then
+  if make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  make "$target" ${make_args[@]+"${make_args[@]}"} -j1 V=s >"$logfile" 2>&1
-  exit_code=$?
-  if [ $exit_code -eq 0 ]; then
+  if make "$target" ${make_args[@]+"${make_args[@]}"} -j1 V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 
