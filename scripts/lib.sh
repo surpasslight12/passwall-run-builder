@@ -55,7 +55,7 @@ make_pkg() {
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-pkg-${label//\//_}-$$.log"
   
-  # Build make arguments array with Rust/Cargo environment variables
+  # Build environment argument array with Rust/Cargo variables
   local make_args=()
   [ -n "${RUSTC_WRAPPER:-}" ] && make_args+=("RUSTC_WRAPPER=${RUSTC_WRAPPER}")
   [ -n "${RUSTFLAGS:-}" ] && make_args+=("RUSTFLAGS=${RUSTFLAGS}")
@@ -65,12 +65,12 @@ make_pkg() {
   [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=${SCCACHE_DIR}")
 
   log_info "Compiling $label (-j$jobs)"
-  if make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1; then
+  if env ${make_args[@]+"${make_args[@]}"} make "$target" -j"$jobs" V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  if make "$target" ${make_args[@]+"${make_args[@]}"} -j1 V=s >"$logfile" 2>&1; then
+  if env ${make_args[@]+"${make_args[@]}"} make "$target" -j1 V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 
