@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # collect-packages.sh — 收集 APK 到 payload 目录
 # Collect built APKs into payload directory
-source "$(dirname "$0")/lib.sh"
+SCRIPT_DIR="$(dirname "$0")"
+source "$SCRIPT_DIR/lib.sh"
 
 step_start "Collect packages"
 
@@ -33,15 +34,21 @@ collect_pkg "luci-i18n-passwall-zh-cn" "$PAYLOAD" \
   || log_info "Chinese i18n package not found (non-critical)"
 
 # ── 收集依赖 / Collect dependencies ──
-DEPS=(
-  chinadns-ng dns2socks geoview hysteria ipt2socks microsocks naiveproxy
-  shadow-tls
-  shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server
-  shadowsocks-rust-sslocal shadowsocks-rust-ssserver
-  shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server
-  simple-obfs-client sing-box tcping trojan-plus tuic-client
-  v2ray-geoip v2ray-geosite v2ray-plugin xray-core xray-plugin
-)
+DEPS=()
+PKGCONF="$SCRIPT_DIR/../config/packages.conf"
+if [ -f "$PKGCONF" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+      DEPS+=("$line")
+    else
+      log_warn "Skipping invalid package name in packages.conf: $line"
+    fi
+  done < "$PKGCONF"
+else
+  log_warn "packages.conf not found, dependency collection list is empty"
+fi
 
 COLLECTED=0
 for p in "${DEPS[@]}"; do

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # compile-packages.sh — 按工具链分组编译 PassWall 依赖包
 # Compile PassWall packages grouped by toolchain
-source "$(dirname "$0")/lib.sh"
+SCRIPT_DIR="$(dirname "$0")"
+source "$SCRIPT_DIR/lib.sh"
 
 step_start "Compile packages"
 
@@ -43,6 +44,30 @@ GO_PKGS=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
 RUST_PKGS=(shadow-tls shadowsocks-rust)
 PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
+PKGCONF="$SCRIPT_DIR/../config/packages.conf"
+SELECTED_PACKAGES=""
+if [ -f "$PKGCONF" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || continue
+    SELECTED_PACKAGES+="$line"$'\n'
+  done < "$PKGCONF"
+fi
+
+is_package_selected() {
+  local pkg="$1"
+  [ -z "$SELECTED_PACKAGES" ] && return 0
+  case "$pkg" in
+    shadowsocks-libev)  printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-libev(-|$)' ;;
+    shadowsocks-rust)   printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-rust(-|$)' ;;
+    shadowsocksr-libev) printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocksr-libev(-|$)' ;;
+    simple-obfs)        printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^simple-obfs(-|$)' ;;
+    v2ray-geodata)      printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^v2ray-(geodata|geoip|geosite)$' ;;
+    *)                  printf '%s' "$SELECTED_PACKAGES" | grep -qx "$pkg" ;;
+  esac
+}
+
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
 declare -A FEEDS_CACHE=()
 while IFS= read -r -d '' fpath; do
@@ -58,8 +83,15 @@ done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -pr
 # Usage: build_group <label> <package1> [package2...]
 build_group() {
   local label="$1"; shift
-  local ok=0 fail=0 t0 total_pkgs=$#
+  local ok=0 fail=0 t0 total_pkgs=0
   t0=$(date +%s)
+  for pkg in "$@"; do
+    is_package_selected "$pkg" && total_pkgs=$((total_pkgs + 1))
+  done
+  if [ "$total_pkgs" -eq 0 ]; then
+    log_info "No selected packages in $label, skipping"
+    return
+  fi
 
   add_timing() {
     local group_label="$1" name="$2" status="$3" duration="$4"
@@ -73,6 +105,7 @@ build_group() {
 
   local idx=0
   for pkg in "$@"; do
+    is_package_selected "$pkg" || continue
     idx=$((idx + 1))
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
