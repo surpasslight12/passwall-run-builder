@@ -63,7 +63,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ### `config/packages.conf`
 
-每行一个包名，`#` 开头为注释。编译和收集的包均需在此列出。
+每行一个包名，`#` 开头为注释。`compile-packages.sh` 和 `collect-packages.sh` 都会按此列表执行，避免“选择了但未编译/未收集”的不一致。
 
 One package name per line. Lines starting with `#` are comments.
 
@@ -89,14 +89,14 @@ Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
   → Build .run Installer → Upload & Release
 ```
 
-编译按工具链分组进行 / Compilation is grouped by toolchain:
+编译按工具链分组进行（按源码目录构建，子包共享同一源码目录）/ Compilation is grouped by toolchain (built by source directory; subpackages share the same source directory):
 
 | 分组 Group | 包 Packages |
 |------|------|
 | Rust | shadow-tls, shadowsocks-rust |
 | Go | geoview, hysteria, sing-box, v2ray-plugin, xray-core, xray-plugin |
-| C/C++ | dns2socks, ipt2socks, microsocks, shadowsocks-libev, shadowsocksr-libev, simple-obfs, tcping, trojan-plus |
-| Prebuilt | chinadns-ng, naiveproxy, tuic-client, v2ray-geodata |
+| C/C++ | dns2socks, ipt2socks, microsocks, shadowsocks-libev（产出 `shadowsocks-libev-*`）, shadowsocksr-libev（产出 `shadowsocksr-libev-*`）, simple-obfs（产出 `simple-obfs-client`）, tcping, trojan-plus |
+| Prebuilt | chinadns-ng, naiveproxy, tuic-client, v2ray-geodata（产出 `v2ray-geoip`/`v2ray-geosite`） |
 
 ## 性能优化 | Performance
 
