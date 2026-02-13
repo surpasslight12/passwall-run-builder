@@ -13,10 +13,11 @@ export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 unset CI GITHUB_ACTIONS
 
 # Rust 编译优化 / Rust compilation optimizations
-# 并行代码生成加速编译。16 是 Rust 推荐的生产环境值（1-16），在编译速度和运行时优化间取得平衡
-# Parallel codegen for faster builds. 16 is Rust's recommended production value (1-16), balancing compile time and runtime optimization
-# 禁用 LTO 以加速编译，设置基础优化级别 / Disable LTO for faster compilation, set basic optimization level
-export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=16 -C lto=off -C opt-level=2"
+# 默认偏向运行性能，可通过环境变量覆盖 / Defaults favor runtime performance, overridable via env vars
+RUST_CODEGEN_UNITS="${RUST_CODEGEN_UNITS:-8}"
+RUST_LTO_MODE="${RUST_LTO_MODE:-thin}"
+RUST_OPT_LEVEL="${RUST_OPT_LEVEL:-3}"
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=${RUST_CODEGEN_UNITS} -C lto=${RUST_LTO_MODE} -C opt-level=${RUST_OPT_LEVEL}"
 export CARGO_INCREMENTAL=1
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 # 减少调试信息以加速编译和链接 / Reduce debug info to speed up compilation and linking

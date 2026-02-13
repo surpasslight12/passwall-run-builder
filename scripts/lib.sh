@@ -52,7 +52,10 @@ retry() {
 # Usage: make_pkg <target> [label]
 make_pkg() {
   local target="$1" label="${2:-$1}"
-  local jobs; jobs=$(nproc)
+  local jobs fallback_jobs
+  jobs=$(nproc)
+  fallback_jobs=$((jobs / 2))
+  [ "$fallback_jobs" -lt 1 ] && fallback_jobs=1
   local logfile="/tmp/build-pkg-${label//\//_}-$$.log"
   
   # Build environment argument array with Rust/Cargo variables
@@ -69,7 +72,14 @@ make_pkg() {
     rm -f "$logfile"; return 0
   fi
 
-  log_warn "Parallel build failed for $label, retrying single-threaded"
+  if [ "$fallback_jobs" -lt "$jobs" ]; then
+    log_warn "Parallel build failed for $label, retrying with -j${fallback_jobs}"
+    if env ${env_args[@]+"${env_args[@]}"} make "$target" -j"$fallback_jobs" V=s >"$logfile" 2>&1; then
+      rm -f "$logfile"; return 0
+    fi
+  fi
+
+  log_warn "Retrying single-threaded for $label"
   if env ${env_args[@]+"${env_args[@]}"} make "$target" -j1 V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi

@@ -106,12 +106,12 @@ Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
 
 - **sccache**: 编译器缓存，避免重复编译相同代码
 - **增量编译**: 启用 `CARGO_INCREMENTAL=1`
-- **并行代码生成**: `-C codegen-units=16` 在编译速度和运行时性能间取得平衡
-- **禁用 LTO**: `-C lto=off` 显著加速编译，适合快速迭代
-- **优化级别**: `-C opt-level=2` 在编译速度和运行时性能间平衡
+- **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡（可通过 `RUST_CODEGEN_UNITS` 覆盖）
+- **ThinLTO**: 默认 `-C lto=thin`，提升运行时性能（可通过 `RUST_LTO_MODE` 覆盖）
+- **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
-首次构建预计提速 **20-30%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成、LTO 禁用和编译器缓存的理论估算）。
+首次构建预计提速 **20-30%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成、ThinLTO 与编译器缓存的理论估算）。
 
 ### 缓存策略 | Caching
 
