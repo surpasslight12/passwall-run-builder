@@ -5,7 +5,7 @@ source "$(dirname "$0")/lib.sh"
 
 step_start "Compile packages"
 
-cd openwrt-sdk
+cd openwrt-sdk || die "Cannot enter openwrt-sdk directory"
 export FORCE_UNSAFE_CONFIGURE=1
 export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
 # Rust ≥1.90 bootstrap panics when CI env vars are set

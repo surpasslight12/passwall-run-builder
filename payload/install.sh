@@ -48,7 +48,7 @@ if [ -d depends ]; then
   for dep in depends/*.apk; do
     [ -e "$dep" ] && set -- "$@" "$dep"
   done
-  log "Found $(ls depends/*.apk 2>/dev/null | wc -l) dependency packages"
+  log "Found $(find depends -maxdepth 1 -name '*.apk' 2>/dev/null | wc -l) dependency packages"
 fi
 
 set -- "$@" haproxy
