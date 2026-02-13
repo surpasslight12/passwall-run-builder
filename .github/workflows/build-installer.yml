@@ -177,9 +177,10 @@ jobs:
           tag_name: ${{ github.ref_name }}
           body: |
             ## Run 文件使用方式 | Run File Usage
+            将 `<RUN_FILE>.run` 替换为本次发布附件中的实际文件名。
             ```bash
-            scp ${{ env.RUN_NAME }} root@openwrt:/tmp/
-            ssh root@openwrt 'cd /tmp && chmod +x ${{ env.RUN_NAME }} && ./${{ env.RUN_NAME }}'
+            scp <RUN_FILE>.run root@openwrt:/tmp/
+            ssh root@openwrt 'cd /tmp && chmod +x <RUN_FILE>.run && ./<RUN_FILE>.run'
             # Optional: restart service to apply changes
             ssh root@openwrt '/etc/init.d/passwall restart'
             ```
