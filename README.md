@@ -35,21 +35,13 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ```
 ├── .github/workflows/
-│   ├── build-installer.yml    # CI workflow
+│   ├── build-installer.yml    # 构建工作流（单文件多步骤）/ Build workflow (single file, multi-step)
 │   └── sync-passwall-tag.yml  # 每日同步上游稳定版 tag
 ├── config/
 │   ├── openwrt-sdk.conf       # SDK URL 配置
 │   └── packages.conf          # 编译包列表
 ├── scripts/
-│   ├── lib.sh                 # 公共函数库
-│   ├── setup-environment.sh   # 环境准备
-│   ├── install-toolchains.sh  # Go/Rust 安装
-│   ├── setup-sdk.sh           # SDK 下载
-│   ├── configure-feeds.sh     # Feeds 与补丁
-│   ├── compile-packages.sh    # 包编译
-│   ├── collect-packages.sh    # 产物收集
-│   ├── build-all.sh           # 统一构建入口（串行执行完整流程）
-│   └── build-installer.sh     # .run 打包
+│   └── lib.sh                 # 公共函数库（日志、重试、make 封装等）
 ├── payload/
 │   └── install.sh             # 设备安装脚本
 └── README.md
@@ -66,7 +58,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ### `config/packages.conf`
 
-每行一个包名，`#` 开头为注释。`compile-packages.sh` 和 `collect-packages.sh` 都会按此列表执行，避免“选择了但未编译/未收集”的不一致。
+每行一个包名，`#` 开头为注释。工作流的编译和收集步骤都会按此列表执行，避免“选择了但未编译/未收集”的不一致。
 
 One package name per line. Lines starting with `#` are comments.
 
@@ -87,11 +79,15 @@ One package name per line. Lines starting with `#` are comments.
 ## 构建流程 | Build Pipeline
 
 ```
-Build Pipeline (scripts/build-all.sh)
+build-installer.yml (single file, multi-step)
   → Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
   → Configure Feeds & Patches → Compile Packages → Collect APKs
   → Build .run Installer → Upload & Release
 ```
+
+所有构建逻辑内联在 `build-installer.yml` 工作流的各个步骤中，共享函数通过 `scripts/lib.sh` 提供。
+
+All build logic is inlined in `build-installer.yml` workflow steps, with shared functions provided by `scripts/lib.sh`.
 
 编译按工具链分组进行（按源码目录构建，子包共享同一源码目录）/ Compilation is grouped by toolchain (built by source directory; subpackages share the same source directory):
 

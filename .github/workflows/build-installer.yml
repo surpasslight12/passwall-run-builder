@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     outputs:
-      run_name: ${{ steps.run-name.outputs.value }}
+      run_name: ${{ steps.installer.outputs.run_name }}
     permissions:
       contents: write
     defaults:
@@ -37,6 +37,7 @@ jobs:
         with:
           persist-credentials: false
 
+      # ── 加载配置 / Load config ──
       - name: Load config
         id: cfg
         run: |
@@ -50,7 +51,7 @@ jobs:
           echo "sdk-hash=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
           echo "week=$(date +%G-W%V)" >> "$GITHUB_OUTPUT"
 
-      # ── Caches ──
+      # ── 缓存恢复 / Restore caches ──
       - name: Cache SDK
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-sdk
@@ -102,16 +103,563 @@ jobs:
           key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
           restore-keys: ${{ env.CACHE_VERSION }}-feeds-
 
-      # ── Build pipeline ──
-      - name: Build pipeline (unified script)
-        run: scripts/build-all.sh "${{ steps.cache-sdk.outputs.cache-hit }}" "${{ steps.cache-feeds.outputs.cache-hit }}"
-
-      - name: Export run name
-        id: run-name
+      # ── 环境准备 / Setup environment ──
+      - name: Setup environment
         run: |
-          [ -n "${RUN_NAME:-}" ] || { echo "::error::RUN_NAME environment variable not set. The build-installer script may have failed."; exit 1; }
-          echo "value=${RUN_NAME}" >> "$GITHUB_OUTPUT"
+          source scripts/lib.sh
+          step_start "Setup environment"
+          export DEBIAN_FRONTEND=noninteractive
 
+          group_start "Free disk space"
+          log_info "Before cleanup: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
+            /usr/share/swift /usr/local/.ghcup 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          sudo apt-get clean 2>/dev/null || true
+          log_info "After cleanup: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+          group_end
+
+          group_start "Install build dependencies"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential libncurses5-dev gawk gettext unzip file \
+            libssl-dev wget python3 git ca-certificates makeself zstd \
+            || die "apt-get install failed"
+          log_info "Build dependencies installed"
+          group_end
+
+          step_end
+
+      # ── 安装工具链 / Install toolchains ──
+      - name: Install toolchains
+        run: |
+          source scripts/lib.sh
+          step_start "Install toolchains"
+
+          # ── Go ──
+          group_start "Install Go"
+          GO_VER=$(curl -fsSL --retry 3 --retry-delay 10 https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+          [ -n "$GO_VER" ] || die "Cannot fetch Go version"
+          CURRENT_GO=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' || true)
+          if [ "$CURRENT_GO" = "$GO_VER" ]; then
+            log_info "Go $GO_VER already installed"
+          else
+            log_info "Installing Go $GO_VER"
+            TARBALL="go${GO_VER}.linux-amd64.tar.gz"
+            retry 3 20 wget -q "https://go.dev/dl/${TARBALL}" -O "/tmp/${TARBALL}"
+            sudo rm -rf /usr/local/go
+            sudo tar -C /usr/local -xzf "/tmp/${TARBALL}"
+            rm -f "/tmp/${TARBALL}"
+            export PATH="/usr/local/go/bin:$PATH"
+            echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          fi
+          go version || die "Go verification failed"
+          group_end
+
+          # ── Rust ──
+          group_start "Install Rust"
+          if command -v rustc >/dev/null 2>&1; then
+            log_info "Rust $(rustc --version | awk '{print $2}') already installed"
+            [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+          else
+            log_info "Installing Rust"
+            retry 3 20 bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
+            source "$HOME/.cargo/env"
+          fi
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          rustup target list --installed | grep -q x86_64-unknown-linux-musl \
+            || rustup target add x86_64-unknown-linux-musl
+          rustc --version || die "Rust verification failed"
+          cargo --version || die "Cargo verification failed"
+
+          if ! command -v sccache >/dev/null 2>&1; then
+            log_info "Installing sccache"
+            retry 3 20 cargo install sccache --locked
+          else
+            log_info "sccache already installed: $(sccache --version)"
+          fi
+          group_end
+
+          step_end
+
+      # ── SDK 准备 / Setup SDK ──
+      - name: Setup SDK
+        run: |
+          source scripts/lib.sh
+          step_start "Setup SDK"
+
+          SDK_CACHE_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
+
+          if [ "$SDK_CACHE_HIT" = "true" ] && [ -f openwrt-sdk/Makefile ]; then
+            log_info "Using cached SDK"
+            rm -rf openwrt-sdk/bin/packages/* openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
+          else
+            group_start "Download SDK"
+            rm -rf openwrt-sdk
+            mkdir -p openwrt-sdk
+            cd openwrt-sdk
+            SDK_FILE=$(basename "$OPENWRT_SDK_URL")
+            log_info "Downloading $SDK_FILE"
+            retry 3 30 wget -q "$OPENWRT_SDK_URL" -O "$SDK_FILE"
+            [ -f "$SDK_FILE" ] || die "Download failed"
+            log_info "Extracting…"
+            case "$SDK_FILE" in
+              *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
+              *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
+              *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
+              *)         die "Unsupported archive: $SDK_FILE" ;;
+            esac
+            rm -f "$SDK_FILE"
+            cd ..
+            group_end
+          fi
+
+          # 替换 SDK 内置 Go / Replace SDK bundled Go
+          group_start "Update SDK Go"
+          SYS_GO=$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go")
+          if [ -x "$SYS_GO" ]; then
+            SYS_VER=$("$SYS_GO" version | awk '{print $3}')
+            GOROOT=$("$SYS_GO" env GOROOT)
+            log_info "System Go: $SYS_VER ($GOROOT)"
+            while IFS= read -r -d '' godir; do
+              SDK_VER=$("$godir/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
+              if [ "$SDK_VER" != "$SYS_VER" ]; then
+                log_info "Replacing $godir ($SDK_VER → $SYS_VER)"
+                rm -rf "$godir" && cp -a "$GOROOT" "$godir"
+              fi
+            done < <(find openwrt-sdk/staging_dir -maxdepth 4 -type d \( -name "go-*" -o -name "go" \) -print0 2>/dev/null)
+          else
+            log_warn "System Go not found, skipping SDK Go replacement"
+          fi
+          group_end
+
+          step_end
+
+      # ── 配置 feeds / Configure feeds ──
+      - name: Configure feeds
+        run: |
+          source scripts/lib.sh
+          step_start "Configure feeds"
+
+          cd openwrt-sdk
+          FEEDS_CACHED="${{ steps.cache-feeds.outputs.cache-hit }}"
+
+          # 配置 feeds / Configure feeds
+          group_start "Configure feeds"
+          if [ -f feeds.conf.default ]; then
+            cp feeds.conf.default feeds.conf
+          else
+            cat > feeds.conf <<'FEEDSEOF'
+          src-git packages https://github.com/openwrt/packages.git
+          src-git luci https://github.com/openwrt/luci.git
+          FEEDSEOF
+          fi
+
+          if [ "$FEEDS_CACHED" = "true" ] && [ -d feeds/packages ] && [ -d feeds/luci ]; then
+            log_info "Using cached feeds (index update only)"
+            ./scripts/feeds update -i
+          else
+            log_info "Full feeds update"
+            retry 3 30 ./scripts/feeds update -a || {
+              log_warn "Feed update failed, trying GitHub mirrors"
+              sed -i \
+                -e 's|git.openwrt.org/openwrt/openwrt.git|github.com/openwrt/openwrt.git|g' \
+                -e 's|git.openwrt.org/feed/packages.git|github.com/openwrt/packages.git|g' \
+                -e 's|git.openwrt.org/project/luci.git|github.com/openwrt/luci.git|g' \
+                -e 's|git.openwrt.org/feed/routing.git|github.com/openwrt/routing.git|g' \
+                -e 's|git.openwrt.org/feed/telephony.git|github.com/openwrt/telephony.git|g' \
+                feeds.conf
+              retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
+            }
+          fi
+          group_end
+
+          # 打补丁 / Apply patches
+          group_start "Apply patches"
+          if [ -d feeds/packages/lang/golang ]; then
+            find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) \
+              -exec grep -l 'GOTOOLCHAIN=local' {} \; \
+              -exec sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} \;
+            log_info "Patched GOTOOLCHAIN"
+          fi
+          CURL_MK="feeds/packages/net/curl/Makefile"
+          if [ -f "$CURL_MK" ] && grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MK"; then
+            sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MK"
+            log_info "Patched curl LDAP"
+          fi
+          RUST_MK="feeds/packages/lang/rust/Makefile"
+          if [ -f "$RUST_MK" ] && grep -qE 'download-ci-llvm=(true|if-unchanged)' "$RUST_MK"; then
+            sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$RUST_MK"
+            log_info "Patched Rust download-ci-llvm"
+          fi
+          group_end
+
+          # 克隆 PassWall / Clone PassWall
+          group_start "Clone PassWall sources"
+          rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,\
+          hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,\
+          shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,\
+          xray-plugin,geoview,shadow-tls}
+          rm -rf package/passwall-packages
+          retry 3 10 git clone --depth=1 \
+            https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
+          rm -rf feeds/luci/applications/luci-app-passwall package/passwall-luci
+          retry 3 10 git clone --depth=1 \
+            https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
+          if [ -n "${PASSWALL_LUCI_REF:-}" ]; then
+            log_info "Checking out: $PASSWALL_LUCI_REF"
+            git -C package/passwall-luci fetch --all --tags
+            git -C package/passwall-luci checkout "$PASSWALL_LUCI_REF" \
+              || die "Failed to checkout: $PASSWALL_LUCI_REF"
+          fi
+          group_end
+
+          # 安装 feeds 包 / Install feeds
+          group_start "Install feeds"
+          ./scripts/feeds update -i
+          ./scripts/feeds install \
+            libev libmbedtls libsodium libopenssl libpcre2 libudns \
+            boost boost-program_options boost-system \
+            ca-bundle c-ares pcre2 zlib libubox libubus \
+            rpcd rpcd-mod-file rpcd-mod-ucode ucode ucode-mod-fs ucode-mod-uci \
+            ucode-mod-ubus ucode-mod-math libucode \
+            coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
+            libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
+            iwinfo openssl libnl-tiny golang rust \
+            || log_warn "Some feed packages unavailable"
+          ./scripts/feeds install luci-base || log_warn "luci-base install had issues"
+          ./scripts/feeds install luci-app-passwall || die "Failed to install luci-app-passwall"
+          group_end
+
+          # 生成 .config / Generate build config
+          group_start "Generate .config"
+          rm -f .config .config.old 2>/dev/null || true
+          make defconfig </dev/null
+          PKGCONF="${GITHUB_WORKSPACE}/config/packages.conf"
+          if [ -f "$PKGCONF" ]; then
+            while IFS= read -r pkg; do
+              echo "CONFIG_PACKAGE_${pkg}=m" >> .config
+            done < <(packages_conf_list "$PKGCONF")
+          else
+            log_warn "packages.conf not found"
+          fi
+          make defconfig </dev/null
+          log_info "Config generated"
+          group_end
+
+          # 验证环境 / Validate
+          group_start "Validate build environment"
+          for tool in go rustc cargo make gcc; do
+            command -v "$tool" >/dev/null 2>&1 || die "Missing: $tool"
+          done
+          check_disk_space 10
+          for path in scripts/feeds staging_dir Makefile package/passwall-packages package/passwall-luci; do
+            [ -e "$path" ] || die "Missing: $path"
+          done
+          log_info "Validation passed"
+          group_end
+
+          step_end
+
+      # ── 编译包 / Compile packages ──
+      - name: Compile packages
+        run: |
+          source scripts/lib.sh
+          step_start "Compile packages"
+
+          cd openwrt-sdk
+          export FORCE_UNSAFE_CONFIGURE=1
+          export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
+          # Rust ≥1.90 bootstrap panics when CI env vars are set
+          unset CI GITHUB_ACTIONS
+
+          # Rust 编译优化 / Rust compilation optimizations
+          RUST_CODEGEN_UNITS="${RUST_CODEGEN_UNITS:-8}"
+          RUST_LTO_MODE="${RUST_LTO_MODE:-thin}"
+          RUST_OPT_LEVEL="${RUST_OPT_LEVEL:-3}"
+          export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C codegen-units=${RUST_CODEGEN_UNITS} -C lto=${RUST_LTO_MODE} -C opt-level=${RUST_OPT_LEVEL}"
+          export CARGO_INCREMENTAL=1
+          export CARGO_NET_GIT_FETCH_WITH_CLI=true
+          export CARGO_PROFILE_RELEASE_DEBUG=0
+
+          if command -v sccache >/dev/null 2>&1; then
+            export RUSTC_WRAPPER=sccache
+            export SCCACHE_DIR="$HOME/.cache/sccache"
+            mkdir -p "$SCCACHE_DIR"
+            if ! sccache --start-server 2>/dev/null; then
+              log_warn "sccache server failed to start, builds will proceed without caching"
+            else
+              log_info "sccache enabled for Rust compilation"
+            fi
+          fi
+
+          log_info "RUSTFLAGS=$RUSTFLAGS"
+          log_info "CARGO_INCREMENTAL=$CARGO_INCREMENTAL"
+          log_info "CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
+          log_info "RUSTC_WRAPPER=${RUSTC_WRAPPER:-<not set>}"
+          log_info "Rust env diag: SCCACHE_DIR=${SCCACHE_DIR:-<not set>} CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI:-<not set>}"
+
+          # 包分组 / Package groups
+          C_PKGS=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
+          GO_PKGS=(geoview hysteria sing-box v2ray-plugin xray-core xray-plugin)
+          RUST_PKGS=(shadow-tls shadowsocks-rust)
+          PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
+
+          PKGCONF="${GITHUB_WORKSPACE}/config/packages.conf"
+          SELECTED_PACKAGES=""
+          if [ -f "$PKGCONF" ]; then
+            while IFS= read -r pkg; do
+              SELECTED_PACKAGES+="$pkg"$'\n'
+            done < <(packages_conf_list "$PKGCONF")
+          fi
+
+          is_package_selected() {
+            local pkg="$1"
+            [ -z "$SELECTED_PACKAGES" ] && return 0
+            case "$pkg" in
+              shadowsocks-libev)  printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-libev(-|$)' ;;
+              shadowsocks-rust)   printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocks-rust(-|$)' ;;
+              shadowsocksr-libev) printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^shadowsocksr-libev(-|$)' ;;
+              simple-obfs)        printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^simple-obfs(-|$)' ;;
+              v2ray-geodata)      printf '%s' "$SELECTED_PACKAGES" | grep -Eq '^v2ray-(geodata|geoip|geosite)$' ;;
+              *)                  printf '%s' "$SELECTED_PACKAGES" | grep -qx "$pkg" ;;
+            esac
+          }
+
+          TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
+          declare -A FEEDS_CACHE=()
+          while IFS= read -r -d '' fpath; do
+            fname=$(basename "$fpath")
+            if [ -n "${FEEDS_CACHE[$fname]+x}" ]; then
+              log_warn "Duplicate feed package name detected: $fname (${FEEDS_CACHE[$fname]} vs $fpath)"
+              continue
+            fi
+            FEEDS_CACHE["$fname"]="$fpath"
+          done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -print0 2>/dev/null)
+
+          build_group() {
+            local label="$1"; shift
+            local ok=0 fail=0 t0 total_pkgs=0
+            t0=$(date +%s)
+            for pkg in "$@"; do
+              is_package_selected "$pkg" && total_pkgs=$((total_pkgs + 1))
+            done
+            if [ "$total_pkgs" -eq 0 ]; then
+              log_info "No selected packages in $label, skipping"
+              return
+            fi
+
+            add_timing() {
+              local group_label="$1" name="$2" status="$3" duration="$4"
+              local display_time="$duration"
+              [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
+              log_info "$name finished in ${display_time} ($status)"
+              PKG_TIMINGS+="${group_label}|${name}|${status}|${display_time}"$'\n'
+            }
+
+            group_start "Build $label (${total_pkgs} packages)"
+            local idx=0
+            for pkg in "$@"; do
+              is_package_selected "$pkg" || continue
+              idx=$((idx + 1))
+              local pkg_path="" status="ok" pkg_t0 pkg_dur
+              [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
+              [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
+              [ -z "$pkg_path" ] && [ -n "${FEEDS_CACHE[$pkg]+x}" ] && pkg_path="${FEEDS_CACHE[$pkg]}"
+              if [ -z "$pkg_path" ]; then
+                log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
+                fail=$((fail + 1))
+                FAILED_LIST="$FAILED_LIST $pkg"
+                status="missing"
+                add_timing "$label" "$pkg" "$status" "N/A"
+                continue
+              fi
+              log_info "[$label ${idx}/${total_pkgs}] Building $pkg …"
+              pkg_t0=$(date +%s)
+              if make_pkg "${pkg_path}/compile" "$pkg"; then
+                ok=$((ok + 1))
+                status="ok"
+              else
+                log_warn "[$label ${idx}/${total_pkgs}] Skipping failed package: $pkg"
+                fail=$((fail + 1))
+                FAILED_LIST="$FAILED_LIST $pkg"
+                status="failed"
+              fi
+              pkg_dur=$(( $(date +%s) - pkg_t0 ))
+              add_timing "$label" "$pkg" "$status" "$pkg_dur"
+            done
+            log_info "$label complete: $ok OK, $fail failed, total $(($(date +%s) - t0))s"
+            group_end
+            TOTAL_OK=$((TOTAL_OK + ok))
+            TOTAL_FAIL=$((TOTAL_FAIL + fail))
+          }
+
+          check_disk_space 10
+
+          build_group "Rust"     "${RUST_PKGS[@]}"
+          build_group "Go"       "${GO_PKGS[@]}"
+          build_group "C/C++"    "${C_PKGS[@]}"
+          build_group "Prebuilt" "${PRE_PKGS[@]}"
+
+          log_info "Dependencies: $TOTAL_OK OK, $TOTAL_FAIL failed"
+          [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
+
+          {
+            SUMMARY="## Build Summary"$'\n'
+            SUMMARY+="- **Built**: $TOTAL_OK"$'\n'
+            SUMMARY+="- **Failed**: $TOTAL_FAIL"$'\n'
+            if [ -n "$FAILED_LIST" ]; then
+              SUMMARY+="### Failed"$'\n'
+              for p in $FAILED_LIST; do SUMMARY+="- \`$p\`"$'\n'; done
+            fi
+            if [ -n "$PKG_TIMINGS" ]; then
+              SUMMARY+="### Build Durations"$'\n'
+              SUMMARY+="| Group | Package | Status | Time |"$'\n'
+              SUMMARY+="| --- | --- | --- | --- |"$'\n'
+              while IFS='|' read -r grp pkg status sec; do
+                [ -z "$grp" ] && continue
+                SUMMARY+="| $grp | $pkg | $status | $sec |"$'\n'
+              done <<< "$PKG_TIMINGS"
+            fi
+            gh_summary "$SUMMARY"
+          }
+
+          MIN_REQUIRED=${MIN_REQUIRED_PACKAGES:-15}
+          MAX_FAILURES=${MAX_ALLOWED_FAILURES:-5}
+          [ "$TOTAL_FAIL" -gt "$MAX_FAILURES" ] && die "Too many failures: $TOTAL_FAIL > $MAX_FAILURES"
+          [ "$TOTAL_OK" -lt "$MIN_REQUIRED" ] && log_warn "Only $TOTAL_OK packages built (need $MIN_REQUIRED)"
+
+          # 编译主包 / Compile main package
+          group_start "Compile luci-app-passwall"
+          make_pkg "package/luci-app-passwall/compile" "luci-app-passwall" \
+            || die "Failed to compile luci-app-passwall"
+          group_end
+
+          # sccache 统计 / sccache statistics
+          if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
+            group_start "sccache statistics"
+            SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
+            log_info "sccache stats:"
+            printf '%s\n' "$SCCACHE_STATS"
+            group_end
+            gh_summary "### sccache statistics"$'\n'"\`\`\`text"$'\n'"$SCCACHE_STATS"$'\n'"\`\`\`"
+          fi
+
+          log_info "Compilation complete: $TOTAL_OK deps + luci-app-passwall"
+          step_end
+
+      # ── 收集产物 / Collect packages ──
+      - name: Collect packages
+        run: |
+          source scripts/lib.sh
+          step_start "Collect packages"
+
+          cd openwrt-sdk
+
+          PAYLOAD="${GITHUB_WORKSPACE}/payload"
+          DEPENDS="$PAYLOAD/depends"
+          mkdir -p "$DEPENDS"
+
+          collect_pkg() {
+            local prefix="$1" dest="$2"
+            local best=""
+            while IFS= read -r -d '' f; do
+              if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
+            done < <(find bin/packages -type f \( -name "${prefix}-*.apk" -o -name "${prefix}_*.apk" \) -print0)
+            [ -n "$best" ] || return 1
+            cp "$best" "$dest/"
+            log_info "Collected $prefix → $(basename "$best")"
+          }
+
+          group_start "Collect packages"
+          find bin/packages \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) \
+            -exec cp {} "$PAYLOAD/" \;
+          collect_pkg "luci-i18n-passwall-zh-cn" "$PAYLOAD" \
+            || log_info "Chinese i18n package not found (non-critical)"
+
+          DEPS=()
+          PKGCONF="${GITHUB_WORKSPACE}/config/packages.conf"
+          if [ -f "$PKGCONF" ]; then
+            while IFS= read -r pkg; do
+              DEPS+=("$pkg")
+            done < <(packages_conf_list "$PKGCONF")
+          else
+            log_warn "packages.conf not found, dependency collection list is empty"
+          fi
+
+          COLLECTED=0
+          for p in "${DEPS[@]}"; do
+            if collect_pkg "$p" "$DEPENDS"; then
+              COLLECTED=$((COLLECTED + 1))
+            else
+              log_warn "Missing: $p"
+            fi
+          done
+          log_info "Collected $COLLECTED/${#DEPS[@]} dependency packages"
+          group_end
+
+          group_start "Validate payload"
+          DEP_COUNT=$(find "$DEPENDS" -name "*.apk" | wc -l)
+          MIN_DEPS=${MIN_REQUIRED_PACKAGES:-10}
+          [ "$DEP_COUNT" -eq 0 ] && die "No dependency APKs found"
+          [ "$DEP_COUNT" -lt "$MIN_DEPS" ] && log_warn "Only $DEP_COUNT packages (expected ≥$MIN_DEPS)"
+          [ -f "$PAYLOAD/install.sh" ] || die "install.sh missing from payload"
+          find "$PAYLOAD" -maxdepth 1 -type f \
+            \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) \
+            -print -quit | grep -q . \
+            || die "luci-app-passwall not found in payload"
+          log_info "Payload OK: $DEP_COUNT deps"
+          group_end
+
+          step_end
+
+      # ── 打包安装文件 / Build installer ──
+      - name: Build installer
+        id: installer
+        run: |
+          source scripts/lib.sh
+          step_start "Build installer"
+
+          group_start "Build installer"
+          mkdir -p build/payload
+          cp -r payload/* build/payload/
+          chmod +x build/payload/install.sh
+          cd build
+
+          PW_FILE=""
+          for f in payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk; do
+            [ -e "$f" ] && { PW_FILE=$(basename "$f"); break; }
+          done
+          [ -z "$PW_FILE" ] && die "luci-app-passwall package not found"
+          PW_VER=$(echo "$PW_FILE" | sed -E 's/luci-app-passwall[-_]//; s/[-_].*//')
+
+          ARCH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p' | tr '/' '_')
+          [ -z "$ARCH" ] && { log_warn "Cannot extract architecture from SDK URL, using 'unknown'"; ARCH="unknown"; }
+          SDK_VER=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9.]*\(-rc[0-9]*\)\?\)-.*#\1#p')
+          [ -z "$SDK_VER" ] && { log_warn "Cannot extract SDK version from SDK URL, using 'unknown'"; SDK_VER="unknown"; }
+
+          RUN_NAME="passwall_${PW_VER}_${ARCH}_sdk_${SDK_VER}.run"
+          LABEL="passwall_${PW_VER}_with_sdk_${SDK_VER}"
+
+          log_info "Building $RUN_NAME"
+          makeself --nox11 --sha256 payload "../${RUN_NAME}" "${LABEL}" ./install.sh \
+            || die "makeself failed"
+          cd ..
+          group_end
+
+          group_start "Verify installer"
+          log_info "$(file "$RUN_NAME")"
+          sh "$RUN_NAME" --check || die "Integrity check failed"
+          log_info "OK — $(du -h "$RUN_NAME" | cut -f1)"
+          group_end
+
+          gh_set_env "RUN_NAME" "$RUN_NAME"
+          echo "run_name=${RUN_NAME}" >> "$GITHUB_OUTPUT"
+
+          step_end
+
+      # ── 保存缓存 / Save caches ──
       - name: Save SDK cache
         if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sdk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -153,12 +701,12 @@ jobs:
             openwrt-sdk/package/feeds
           key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
 
-      # ── Publish ──
+      # ── 发布 / Publish ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.run-name.outputs.value }}
-          path: ${{ steps.run-name.outputs.value }}
+          name: ${{ steps.installer.outputs.run_name }}
+          path: ${{ steps.installer.outputs.run_name }}
 
       - name: Diagnostics
         if: always()
