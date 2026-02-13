@@ -13,6 +13,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - **Rust 编译优化**（sccache、增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
+- 每日自动检查上游 PassWall 稳定版并在有新版本时自动打同名 tag 触发构建
 
 ## 快速开始 | Quick Start
 
@@ -34,7 +35,8 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ```
 ├── .github/workflows/
-│   └── build-installer.yml    # CI workflow
+│   ├── build-installer.yml    # CI workflow
+│   └── sync-passwall-tag.yml  # 每日同步上游稳定版 tag
 ├── config/
 │   ├── openwrt-sdk.conf       # SDK URL 配置
 │   └── packages.conf          # 编译包列表
