@@ -127,7 +127,7 @@ jobs:
       - name: Export run name
         id: run-name
         run: |
-          [ -n "${RUN_NAME:-}" ] || { echo "::error::RUN_NAME not set"; exit 1; }
+          [ -n "${RUN_NAME:-}" ] || { echo "::error::RUN_NAME environment variable not set. The build-installer script may have failed."; exit 1; }
           echo "value=${RUN_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Save SDK cache
