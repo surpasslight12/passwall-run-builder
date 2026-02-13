@@ -99,6 +99,22 @@ check_disk_space() {
   log_info "Disk: ${avail_gb}GB available"
 }
 
+# ── 包配置读取 / Read package config ──
+# Usage: packages_conf_list <path/to/packages.conf>
+packages_conf_list() {
+  local pkgconf="$1" line
+  [ -f "$pkgconf" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
+      printf '%s\n' "$line"
+    else
+      log_warn "Skipping invalid package name in $(basename "$pkgconf"): $line"
+    fi
+  done < "$pkgconf"
+}
+
 # ── GitHub Actions 辅助 / GitHub Actions helpers ──
 gh_set_env() {
   export "$1=$2"

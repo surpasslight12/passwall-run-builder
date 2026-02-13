@@ -49,12 +49,9 @@ PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 PKGCONF="$SCRIPT_DIR/../config/packages.conf"
 SELECTED_PACKAGES=""
 if [ -f "$PKGCONF" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "${line// }" ]] && continue
-    [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]] || continue
-    SELECTED_PACKAGES+="$line"$'\n'
-  done < "$PKGCONF"
+  while IFS= read -r pkg; do
+    SELECTED_PACKAGES+="$pkg"$'\n'
+  done < <(packages_conf_list "$PKGCONF")
 fi
 
 is_package_selected() {

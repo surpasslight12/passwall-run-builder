@@ -26,9 +26,14 @@ jobs:
     timeout-minutes: 360
     permissions:
       contents: write
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Load config
         id: cfg
