@@ -250,10 +250,10 @@ jobs:
           if [ -f feeds.conf.default ]; then
             cp feeds.conf.default feeds.conf
           else
-            cat > feeds.conf <<'FEEDSEOF'
+            cat > feeds.conf <<'EOF'
           src-git packages https://github.com/openwrt/packages.git
           src-git luci https://github.com/openwrt/luci.git
-          FEEDSEOF
+          EOF
           fi
 
           if [ "$FEEDS_CACHED" = "true" ] && [ -d feeds/packages ] && [ -d feeds/luci ]; then
