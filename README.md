@@ -13,7 +13,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - **Rust 编译优化**（sccache、增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
-- 每日自动检查上游 PassWall 稳定版并在有新版本时自动打同名 tag 触发构建
+- 每日自动检查上游 PassWall 稳定版并在有新版本时自动打去掉前缀 `v` 的版本 tag（如 `26.2.6-1`）触发构建
 
 ## 快速开始 | Quick Start
 
@@ -21,7 +21,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 2. **配置 SDK** — 编辑 `config/openwrt-sdk.conf`，设置与目标设备匹配的 SDK 下载地址
 3. **触发构建** — push tag 或手动触发 workflow
    ```bash
-   git tag v1.0.0 && git push origin v1.0.0
+   git tag 26.2.6-1 && git push origin 26.2.6-1
    ```
 4. **下载产物** — 在 Actions 或 Releases 页面下载 `.run` 文件
 5. **安装到设备**

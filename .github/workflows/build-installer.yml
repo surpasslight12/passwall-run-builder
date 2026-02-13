@@ -2,7 +2,7 @@ name: Build PassWall Installer
 
 on:
   push:
-    tags: ['v*']
+    tags: ['[0-9]*.[0-9]*.[0-9]*-[0-9]*']
   workflow_dispatch:
     inputs:
       use_cache:
