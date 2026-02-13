@@ -47,7 +47,11 @@ TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
 declare -A FEEDS_CACHE=()
 while IFS= read -r -d '' fpath; do
   fname=$(basename "$fpath")
-  [ -n "${FEEDS_CACHE[$fname]+x}" ] || FEEDS_CACHE["$fname"]="$fpath"
+  if [ -n "${FEEDS_CACHE[$fname]+x}" ]; then
+    log_warn "Duplicate feed package name detected: $fname (${FEEDS_CACHE[$fname]} vs $fpath)"
+    continue
+  fi
+  FEEDS_CACHE["$fname"]="$fpath"
 done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -print0 2>/dev/null)
 
 # ── 编译一组包 / Build a group ──
