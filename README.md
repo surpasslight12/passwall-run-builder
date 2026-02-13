@@ -48,6 +48,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 │   ├── configure-feeds.sh     # Feeds 与补丁
 │   ├── compile-packages.sh    # 包编译
 │   ├── collect-packages.sh    # 产物收集
+│   ├── build-all.sh           # 统一构建入口（串行执行完整流程）
 │   └── build-installer.sh     # .run 打包
 ├── payload/
 │   └── install.sh             # 设备安装脚本
@@ -86,7 +87,8 @@ One package name per line. Lines starting with `#` are comments.
 ## 构建流程 | Build Pipeline
 
 ```
-Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
+Build Pipeline (scripts/build-all.sh)
+  → Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
   → Configure Feeds & Patches → Compile Packages → Collect APKs
   → Build .run Installer → Upload & Release
 ```
