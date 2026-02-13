@@ -107,7 +107,7 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 - **sccache**: 编译器缓存，避免重复编译相同代码
 - **增量编译**: 启用 `CARGO_INCREMENTAL=1`
 - **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡（可通过 `RUST_CODEGEN_UNITS` 覆盖）
-- **ThinLTO**: 默认 `-C lto=thin`，提升运行时性能（可通过 `RUST_LTO_MODE` 覆盖）
+- **LTO 可选**: 默认关闭 `-C lto`（`RUST_LTO_MODE=off`），避免 OpenWrt Rust host 引导阶段与 `embed-bitcode=no` 冲突；可通过 `RUST_LTO_MODE=thin/fat` 显式开启
 - **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
