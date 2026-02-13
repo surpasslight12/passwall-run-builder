@@ -41,7 +41,7 @@ jobs:
       - name: Load config
         id: cfg
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           while IFS= read -r line || [ -n "$line" ]; do
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
             [[ -z "${line// }" ]] && continue
@@ -106,7 +106,7 @@ jobs:
       # ── 环境准备 / Setup environment ──
       - name: Setup environment
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Setup environment"
           export DEBIAN_FRONTEND=noninteractive
 
@@ -134,7 +134,7 @@ jobs:
       # ── 安装工具链 / Install toolchains ──
       - name: Install toolchains
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Install toolchains"
 
           # ── Go ──
@@ -186,7 +186,7 @@ jobs:
       # ── SDK 准备 / Setup SDK ──
       - name: Setup SDK
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Setup SDK"
 
           SDK_CACHE_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
@@ -239,7 +239,7 @@ jobs:
       # ── 配置 feeds / Configure feeds ──
       - name: Configure feeds
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Configure feeds"
 
           cd openwrt-sdk
@@ -365,7 +365,7 @@ jobs:
       # ── 编译包 / Compile packages ──
       - name: Compile packages
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Compile packages"
 
           cd openwrt-sdk
@@ -552,7 +552,7 @@ jobs:
       # ── 收集产物 / Collect packages ──
       - name: Collect packages
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Collect packages"
 
           cd openwrt-sdk
@@ -618,7 +618,7 @@ jobs:
       - name: Build installer
         id: installer
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           step_start "Build installer"
 
           group_start "Build installer"
@@ -711,7 +711,7 @@ jobs:
       - name: Diagnostics
         if: always()
         run: |
-          source scripts/lib.sh
+          source scripts/utils.sh
           log_info "Go: $(go version 2>/dev/null || echo N/A)"
           log_info "Rust: $(rustc --version 2>/dev/null || echo N/A)"
           log_info "Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"

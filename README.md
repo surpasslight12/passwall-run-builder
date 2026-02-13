@@ -41,7 +41,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 │   ├── openwrt-sdk.conf       # SDK URL 配置
 │   └── packages.conf          # 编译包列表
 ├── scripts/
-│   └── lib.sh                 # 公共函数库（日志、重试、make 封装等）
+│   └── utils.sh               # 工具函数库（日志、重试、make 封装等）
 ├── payload/
 │   └── install.sh             # 设备安装脚本
 └── README.md
@@ -85,9 +85,9 @@ build-installer.yml (single file, multi-step)
   → Build .run Installer → Upload & Release
 ```
 
-所有构建逻辑内联在 `build-installer.yml` 工作流的各个步骤中，共享函数通过 `scripts/lib.sh` 提供。
+所有构建逻辑内联在 `build-installer.yml` 工作流的各个步骤中，共享函数通过 `scripts/utils.sh` 提供。
 
-All build logic is inlined in `build-installer.yml` workflow steps, with shared functions provided by `scripts/lib.sh`.
+All build logic is inlined in `build-installer.yml` workflow steps, with shared functions provided by `scripts/utils.sh`.
 
 编译按工具链分组进行（按源码目录构建，子包共享同一源码目录）/ Compilation is grouped by toolchain (built by source directory; subpackages share the same source directory):
 
