@@ -175,6 +175,15 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          body: |
+            ## Run 文件使用方式 | Run File Usage
+            将 `<RUN_FILE>.run` 替换为本次发布附件中的实际文件名。
+            ```bash
+            scp <RUN_FILE>.run root@openwrt:/tmp/
+            ssh root@openwrt 'cd /tmp && chmod +x <RUN_FILE>.run && ./<RUN_FILE>.run'
+            # Optional: restart service to apply changes
+            ssh root@openwrt '/etc/init.d/passwall restart'
+            ```
           files: ${{ env.RUN_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
