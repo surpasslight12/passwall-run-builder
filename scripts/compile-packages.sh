@@ -44,6 +44,15 @@ RUST_PKGS=(shadow-tls shadowsocks-rust)
 PRE_PKGS=(chinadns-ng naiveproxy tuic-client v2ray-geodata)
 
 TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
+declare -A FEEDS_CACHE=()
+while IFS= read -r -d '' fpath; do
+  fname=$(basename "$fpath")
+  if [ -n "${FEEDS_CACHE[$fname]+x}" ]; then
+    log_warn "Duplicate feed package name detected: $fname (${FEEDS_CACHE[$fname]} vs $fpath)"
+    continue
+  fi
+  FEEDS_CACHE["$fname"]="$fpath"
+done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -print0 2>/dev/null)
 
 # ── 编译一组包 / Build a group ──
 # Usage: build_group <label> <package1> [package2...]
@@ -61,12 +70,6 @@ build_group() {
   }
 
   group_start "Build $label (${total_pkgs} packages)"
-  # Build feeds path lookup cache for fallback
-  local -A feeds_cache=()
-  while IFS= read -r -d '' fpath; do
-    local fname; fname=$(basename "$fpath")
-    feeds_cache["$fname"]="$fpath"
-  done < <(find package/feeds -maxdepth 2 -type l -print0 2>/dev/null)
 
   local idx=0
   for pkg in "$@"; do
@@ -74,7 +77,7 @@ build_group() {
     local pkg_path="" status="ok" pkg_t0 pkg_dur
     [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
     [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
-    [ -z "$pkg_path" ] && [ -n "${feeds_cache[$pkg]+x}" ] && pkg_path="${feeds_cache[$pkg]}"
+    [ -z "$pkg_path" ] && [ -n "${FEEDS_CACHE[$pkg]+x}" ] && pkg_path="${FEEDS_CACHE[$pkg]}"
     if [ -z "$pkg_path" ]; then
       log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
       fail=$((fail + 1))
