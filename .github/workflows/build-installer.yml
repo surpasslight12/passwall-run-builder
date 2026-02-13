@@ -103,26 +103,8 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-feeds-
 
       # ── Build pipeline ──
-      - name: Setup environment
-        run: scripts/setup-environment.sh
-
-      - name: Install toolchains
-        run: scripts/install-toolchains.sh
-
-      - name: Setup SDK
-        run: scripts/setup-sdk.sh "${{ steps.cache-sdk.outputs.cache-hit }}"
-
-      - name: Configure feeds
-        run: scripts/configure-feeds.sh "${{ steps.cache-feeds.outputs.cache-hit }}"
-
-      - name: Compile packages
-        run: RUST_ENV_DIAG=1 scripts/compile-packages.sh
-
-      - name: Collect packages
-        run: scripts/collect-packages.sh
-
-      - name: Build installer
-        run: scripts/build-installer.sh
+      - name: Build pipeline (unified script)
+        run: scripts/build-all.sh "${{ steps.cache-sdk.outputs.cache-hit }}" "${{ steps.cache-feeds.outputs.cache-hit }}"
 
       - name: Export run name
         id: run-name
