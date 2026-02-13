@@ -37,6 +37,7 @@ log_info "RUSTFLAGS=$RUSTFLAGS"
 log_info "CARGO_INCREMENTAL=$CARGO_INCREMENTAL"
 log_info "CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
 log_info "RUSTC_WRAPPER=${RUSTC_WRAPPER:-<not set>}"
+[ "${RUST_ENV_DIAG:-0}" = "1" ] && log_info "Rust env diag: RUSTC_WRAPPER=${RUSTC_WRAPPER:-<not set>} SCCACHE_DIR=${SCCACHE_DIR:-<not set>} CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-<not set>} RUSTFLAGS=${RUSTFLAGS:-<not set>}"
 
 # ── 包分组 / Package groups ──
 C_PKGS=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
