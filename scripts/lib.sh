@@ -55,22 +55,22 @@ make_pkg() {
   local jobs; jobs=$(nproc)
   local logfile="/tmp/build-pkg-${label//\//_}-$$.log"
   
-  # Build make arguments array with Rust/Cargo environment variables
-  local make_args=()
-  [ -n "${RUSTC_WRAPPER:-}" ] && make_args+=("RUSTC_WRAPPER=${RUSTC_WRAPPER}")
-  [ -n "${RUSTFLAGS:-}" ] && make_args+=("RUSTFLAGS=${RUSTFLAGS}")
-  [ -n "${CARGO_INCREMENTAL:-}" ] && make_args+=("CARGO_INCREMENTAL=${CARGO_INCREMENTAL}")
-  [ -n "${CARGO_NET_GIT_FETCH_WITH_CLI:-}" ] && make_args+=("CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI}")
-  [ -n "${CARGO_PROFILE_RELEASE_DEBUG:-}" ] && make_args+=("CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG}")
-  [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=${SCCACHE_DIR}")
+  # Build environment argument array with Rust/Cargo variables
+  local env_args=()
+  [ -n "${RUSTC_WRAPPER:-}" ] && env_args+=("RUSTC_WRAPPER=${RUSTC_WRAPPER}")
+  [ -n "${RUSTFLAGS:-}" ] && env_args+=("RUSTFLAGS=${RUSTFLAGS}")
+  [ -n "${CARGO_INCREMENTAL:-}" ] && env_args+=("CARGO_INCREMENTAL=${CARGO_INCREMENTAL}")
+  [ -n "${CARGO_NET_GIT_FETCH_WITH_CLI:-}" ] && env_args+=("CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI}")
+  [ -n "${CARGO_PROFILE_RELEASE_DEBUG:-}" ] && env_args+=("CARGO_PROFILE_RELEASE_DEBUG=${CARGO_PROFILE_RELEASE_DEBUG}")
+  [ -n "${SCCACHE_DIR:-}" ] && env_args+=("SCCACHE_DIR=${SCCACHE_DIR}")
 
   log_info "Compiling $label (-j$jobs)"
-  if make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1; then
+  if env ${env_args[@]+"${env_args[@]}"} make "$target" -j"$jobs" V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  if make "$target" ${make_args[@]+"${make_args[@]}"} -j1 V=s >"$logfile" 2>&1; then
+  if env ${env_args[@]+"${env_args[@]}"} make "$target" -j1 V=s >"$logfile" 2>&1; then
     rm -f "$logfile"; return 0
   fi
 

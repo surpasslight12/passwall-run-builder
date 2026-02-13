@@ -106,7 +106,7 @@ jobs:
         run: scripts/configure-feeds.sh "${{ steps.cache-feeds.outputs.cache-hit }}"
 
       - name: Compile packages
-        run: scripts/compile-packages.sh
+        run: RUST_ENV_DIAG=1 scripts/compile-packages.sh
 
       - name: Collect packages
         run: scripts/collect-packages.sh
