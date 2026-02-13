@@ -176,11 +176,12 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           body: |
-            ## Run 文件使用方式
+            ## Run 文件使用方式 | Run File Usage
             ```bash
             scp ${{ env.RUN_NAME }} root@openwrt:/tmp/
             ssh root@openwrt 'cd /tmp && chmod +x ${{ env.RUN_NAME }} && ./${{ env.RUN_NAME }}'
-            /etc/init.d/passwall restart
+            # Optional: restart service to apply changes
+            ssh root@openwrt '/etc/init.d/passwall restart'
             ```
           files: ${{ env.RUN_NAME }}
         env:
