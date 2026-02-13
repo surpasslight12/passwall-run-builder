@@ -57,7 +57,8 @@ jobs:
               core.info(`Pushed new tag ${tag}.`)
               core.setOutput('created', 'true')
             } catch (error) {
-              if (error.status === 422) {
+              const message = error?.response?.data?.message || error?.message || ''
+              if (error.status === 422 && message.includes('Reference already exists')) {
                 core.info(`Tag ${tag} already created by another run, skip.`)
                 core.setOutput('created', 'false')
                 return
@@ -68,4 +69,4 @@ jobs:
       - name: Summary
         run: |
           echo "- Upstream tag: \`${{ steps.upstream.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Created new tag: \`${{ steps.upstream.outputs.created || 'false' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Created new tag: \`${{ steps.upstream.outputs.created }}\`" >> "$GITHUB_STEP_SUMMARY"
