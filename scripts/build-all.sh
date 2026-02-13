@@ -13,7 +13,9 @@ CFG_FILE="$SCRIPT_DIR/../config/openwrt-sdk.conf"
 while IFS= read -r line || [ -n "$line" ]; do
   [[ "$line" =~ ^[[:space:]]*# ]] && continue
   [[ -z "${line// }" ]] && continue
-  [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && export "$line"
+  if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+    export "${BASH_REMATCH[1]}=${BASH_REMATCH[2]}"
+  fi
 done < "$CFG_FILE"
 
 : "${OPENWRT_SDK_URL:?OPENWRT_SDK_URL not set}"
