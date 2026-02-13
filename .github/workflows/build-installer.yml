@@ -545,9 +545,13 @@ jobs:
             SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
             log_info "sccache stats:"
             printf '%s\n' "$SCCACHE_STATS"
-            SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Compile requests/{print $3}' | tail -n1)
-            if [ "${SCCACHE_REQUESTS:-0}" = "0" ]; then
-              log_warn "sccache compile requests are 0, Rust cache utility is limited in this run"
+            SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Compile requests/{print $3}' | tail -n1 | tr -d '[:space:]')
+            if [[ "$SCCACHE_REQUESTS" =~ ^[0-9]+$ ]]; then
+              if [ "$SCCACHE_REQUESTS" -eq 0 ]; then
+                log_warn "sccache compile requests are 0, Rust cache utility is limited in this run"
+              fi
+            else
+              log_warn "Unable to parse sccache compile requests from stats output"
             fi
             group_end
             gh_summary "### sccache statistics"$'\n'"\`\`\`text"$'\n'"$SCCACHE_STATS"$'\n'"\`\`\`"
