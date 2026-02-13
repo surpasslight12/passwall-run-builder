@@ -24,6 +24,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    outputs:
+      run_name: ${{ steps.run-name.outputs.value }}
     permissions:
       contents: write
     defaults:
@@ -122,6 +124,12 @@ jobs:
       - name: Build installer
         run: scripts/build-installer.sh
 
+      - name: Export run name
+        id: run-name
+        run: |
+          [ -n "${RUN_NAME:-}" ] || { echo "::error::RUN_NAME not set"; exit 1; }
+          echo "value=${RUN_NAME}" >> "$GITHUB_OUTPUT"
+
       - name: Save SDK cache
         if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sdk.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -167,26 +175,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.RUN_NAME }}
-          path: ${{ env.RUN_NAME }}
-
-      - name: Create release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          body: |
-            ## Run 文件使用方式 | Run File Usage
-            将 `<RUN_FILE>.run` 替换为本次发布附件中的实际文件名。
-            ```bash
-            scp <RUN_FILE>.run root@openwrt:/tmp/
-            ssh root@openwrt 'cd /tmp && chmod +x <RUN_FILE>.run && ./<RUN_FILE>.run'
-            # Optional: restart service to apply changes
-            ssh root@openwrt '/etc/init.d/passwall restart'
-            ```
-          files: ${{ env.RUN_NAME }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: ${{ steps.run-name.outputs.value }}
+          path: ${{ steps.run-name.outputs.value }}
 
       - name: Diagnostics
         if: always()
@@ -211,3 +201,33 @@ jobs:
               && echo "- Installer: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))" \
               || echo "- Installer: not built"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.run_name }}
+          path: .
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          body: |
+            ## Run 文件使用方式 | Run File Usage
+            将 `<RUN_FILE>.run` 替换为本次发布附件中的实际文件名。
+            ```bash
+            scp <RUN_FILE>.run root@openwrt:/tmp/
+            ssh root@openwrt 'cd /tmp && chmod +x <RUN_FILE>.run && ./<RUN_FILE>.run'
+            # Optional: restart service to apply changes
+            ssh root@openwrt '/etc/init.d/passwall restart'
+            ```
+          files: ${{ needs.build.outputs.run_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
