@@ -37,15 +37,9 @@ collect_pkg "luci-i18n-passwall-zh-cn" "$PAYLOAD" \
 DEPS=()
 PKGCONF="$SCRIPT_DIR/../config/packages.conf"
 if [ -f "$PKGCONF" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "${line// }" ]] && continue
-    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
-      DEPS+=("$line")
-    else
-      log_warn "Skipping invalid package name in packages.conf: $line"
-    fi
-  done < "$PKGCONF"
+  while IFS= read -r pkg; do
+    DEPS+=("$pkg")
+  done < <(packages_conf_list "$PKGCONF")
 else
   log_warn "packages.conf not found, dependency collection list is empty"
 fi

@@ -35,7 +35,7 @@ else
       -e 's|git.openwrt.org/feed/routing.git|github.com/openwrt/routing.git|g' \
       -e 's|git.openwrt.org/feed/telephony.git|github.com/openwrt/telephony.git|g' \
       feeds.conf
-    ./scripts/feeds update -a || die "Feeds update failed"
+    retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
   }
 fi
 group_end
@@ -117,15 +117,9 @@ make defconfig </dev/null
 
 PKGCONF="$SCRIPT_DIR/../config/packages.conf"
 if [ -f "$PKGCONF" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ -z "${line// }" ]] && continue
-    if [[ "$line" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
-      echo "CONFIG_PACKAGE_${line}=m" >> .config
-    else
-      log_warn "Skipping invalid package name: $line"
-    fi
-  done < "$PKGCONF"
+  while IFS= read -r pkg; do
+    echo "CONFIG_PACKAGE_${pkg}=m" >> .config
+  done < <(packages_conf_list "$PKGCONF")
 else
   log_warn "packages.conf not found"
 fi
