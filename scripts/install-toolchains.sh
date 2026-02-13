@@ -8,7 +8,7 @@ step_start "Install toolchains"
 # ── Go ──
 group_start "Install Go"
 
-GO_VER=$(curl -sf https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
+GO_VER=$(retry 3 10 bash -c 'curl -sf https://go.dev/VERSION?m=text | head -1' | sed 's/go//')
 [ -n "$GO_VER" ] || die "Cannot fetch Go version"
 
 CURRENT_GO=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' || true)
