@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# lib.sh — 公共函数库 / Shared helper library
-# Usage: source "$(dirname "$0")/lib.sh"
+# utils.sh — 工具函数库 / Utility functions
+# Usage: source scripts/utils.sh
 
 set -euo pipefail
 
