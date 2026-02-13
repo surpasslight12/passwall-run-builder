@@ -88,7 +88,7 @@ jobs:
               owner,
               repo,
               workflow_id: 'build-installer.yml',
-              ref: tag,
+              ref: `refs/tags/${tag}`,
               inputs: {
                 use_cache: 'true'
               }
