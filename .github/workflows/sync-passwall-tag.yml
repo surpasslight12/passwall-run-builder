@@ -1,0 +1,48 @@
+name: Sync PassWall Version Tag
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get upstream latest stable tag
+        id: upstream
+        run: |
+          set -euo pipefail
+          tag=$(curl -fsSL https://api.github.com/repos/Openwrt-Passwall/openwrt-passwall/releases/latest | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')
+          [ -n "$tag" ] || { echo "::error::Failed to get upstream tag"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag when new
+        env:
+          TAG: ${{ steps.upstream.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists, skip."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${TAG}"
+
+          if git push origin "refs/tags/${TAG}"; then
+            echo "Pushed new tag ${TAG}."
+          elif git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already created by another run, skip."
+          else
+            echo "::error::Failed to push tag ${TAG}"
+            exit 1
+          fi
