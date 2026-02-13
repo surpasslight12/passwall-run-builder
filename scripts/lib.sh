@@ -66,14 +66,14 @@ make_pkg() {
   [ -n "${SCCACHE_DIR:-}" ] && make_args+=("SCCACHE_DIR=$SCCACHE_DIR")
 
   log_info "Compiling $label (-j$jobs)"
-  make "$target" "${make_args[@]}" -j"$jobs" V=s >"$logfile" 2>&1
+  make "$target" ${make_args[@]+"${make_args[@]}"} -j"$jobs" V=s >"$logfile" 2>&1
   exit_code=$?
   if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
   fi
 
   log_warn "Parallel build failed for $label, retrying single-threaded"
-  make "$target" "${make_args[@]}" -j1 V=s >"$logfile" 2>&1
+  make "$target" ${make_args[@]+"${make_args[@]}"} -j1 V=s >"$logfile" 2>&1
   exit_code=$?
   if [ $exit_code -eq 0 ]; then
     rm -f "$logfile"; return 0
