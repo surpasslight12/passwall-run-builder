@@ -73,9 +73,7 @@ One package name per line. Lines starting with `#` are comments.
 
 | 参数 Input | 默认值 Default | 说明 Description |
 |------|------|------|
-| `use_cache` | `true` | 是否启用缓存 / Enable caching |
-| `min_required_packages` | `15` | 最少成功编译包数 / Minimum required built packages |
-| `max_allowed_failures` | `5` | 最大允许失败数 / Maximum allowed build failures |
+| `use_cache` | `true` | 是否启用缓存（checkbox）/ Enable caching (checkbox) |
 
 ## 系统要求 | Requirements
 

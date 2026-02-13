@@ -7,16 +7,9 @@ on:
     inputs:
       use_cache:
         description: 'Enable caching'
+        type: boolean
         required: false
-        default: 'true'
-      min_required_packages:
-        description: 'Minimum required packages'
-        required: false
-        default: '15'
-      max_allowed_failures:
-        description: 'Maximum allowed failures'
-        required: false
-        default: '5'
+        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,8 +17,8 @@ concurrency:
 
 env:
   CACHE_VERSION: v1
-  MIN_REQUIRED_PACKAGES: ${{ inputs.min_required_packages || '15' }}
-  MAX_ALLOWED_FAILURES: ${{ inputs.max_allowed_failures || '5' }}
+  MIN_REQUIRED_PACKAGES: '15'
+  MAX_ALLOWED_FAILURES: '5'
 
 jobs:
   build:
@@ -52,7 +45,7 @@ jobs:
 
       # ── Caches ──
       - name: Cache SDK
-        if: inputs.use_cache != 'false'
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-sdk
         uses: actions/cache@v4
         with:
@@ -61,7 +54,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-sdk-
 
       - name: Cache Go modules
-        if: inputs.use_cache != 'false'
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         uses: actions/cache@v4
         with:
           path: openwrt-sdk/dl/go-mod-cache
@@ -69,7 +62,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-go-
 
       - name: Cache Rust/Cargo
-        if: inputs.use_cache != 'false'
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         uses: actions/cache@v4
         with:
           path: |
@@ -81,7 +74,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-rust-
 
       - name: Cache sccache
-        if: inputs.use_cache != 'false'
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/sccache
@@ -89,7 +82,7 @@ jobs:
           restore-keys: ${{ env.CACHE_VERSION }}-sccache-
 
       - name: Cache feeds
-        if: inputs.use_cache != 'false'
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-feeds
         uses: actions/cache@v4
         with:
