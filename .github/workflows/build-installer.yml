@@ -546,9 +546,19 @@ jobs:
             log_info "sccache stats:"
             printf '%s\n' "$SCCACHE_STATS"
             SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Compile requests/{print $3}' | tail -n1 | tr -d '[:space:]')
+            SCCACHE_HITS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Cache hits/{print $3}' | tail -n1 | tr -d '[:space:]')
+            SCCACHE_MISSES=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Cache misses/{print $3}' | tail -n1 | tr -d '[:space:]')
             if [[ "$SCCACHE_REQUESTS" =~ ^[0-9]+$ ]]; then
               if [ "$SCCACHE_REQUESTS" -eq 0 ]; then
                 log_warn "sccache compile requests are 0, Rust cache utility is limited in this run"
+              elif [[ "$SCCACHE_HITS" =~ ^[0-9]+$ ]] && [[ "$SCCACHE_MISSES" =~ ^[0-9]+$ ]]; then
+                SCCACHE_HIT_RATE=$(awk "BEGIN { printf \"%.2f\", ($SCCACHE_HITS / $SCCACHE_REQUESTS) * 100 }")
+                log_info "sccache cache hits=${SCCACHE_HITS}, misses=${SCCACHE_MISSES}, hit-rate=${SCCACHE_HIT_RATE}%"
+                if [ "$SCCACHE_HITS" -eq 0 ]; then
+                  log_warn "sccache has requests but zero cache hits, cache effectiveness is limited in this run"
+                fi
+              else
+                log_warn "Unable to parse sccache cache hits/misses from stats output"
               fi
             else
               log_warn "Unable to parse sccache compile requests from stats output"
