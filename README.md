@@ -9,7 +9,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 从 OpenWrt SDK 交叉编译全部依赖（C/C++、Go、Rust、预编译）
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
-- 五层缓存（SDK / Go / Rust / sccache / Feeds）加速构建
+- 四层缓存（SDK / Rust / sccache / Feeds）加速构建
 - **Rust 编译优化**（sccache、增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
@@ -118,8 +118,7 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 | 缓存 Cache | 内容 Content | Key |
 |------|------|------|
 | SDK | OpenWrt SDK 完整目录 | SDK URL hash |
-| Go modules | Go 模块缓存 | 按周轮换 |
-| Rust/Cargo | Cargo registry & rustup | 按周轮换 |
+| Rust/Cargo | Cargo registry & git | 按周轮换 |
 | sccache | Rust 编译缓存 | 按周轮换 |
 | Feeds | OpenWrt feeds & packages | 按周轮换 |
 
