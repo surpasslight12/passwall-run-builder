@@ -9,8 +9,8 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 从 OpenWrt SDK 交叉编译全部依赖（C/C++、Go、Rust、预编译）
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
-- 四层缓存（SDK / Rust / sccache / Feeds）加速构建
-- **Rust 编译优化**（sccache、增量编译、优化 RUSTFLAGS）
+- 三层缓存（SDK / Rust / Feeds）加速构建
+- **Rust 编译优化**（增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
 - 每日自动检查上游 PassWall 稳定版并在有新版本时自动打去掉前缀 `v` 的版本 tag（如 `26.2.6-1`）触发构建
@@ -104,14 +104,13 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 自动应用以下优化以加快 Rust 组件编译：
 
-- **sccache**: 编译器缓存，避免重复编译相同代码
 - **增量编译**: 启用 `CARGO_INCREMENTAL=1`
 - **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡（可通过 `RUST_CODEGEN_UNITS` 覆盖）
 - **LTO 可选**: 默认关闭 `-C lto`（`RUST_LTO_MODE=off`），避免 OpenWrt Rust host 引导阶段与 `embed-bitcode=no` 冲突；可通过 `RUST_LTO_MODE=thin/fat` 显式开启
 - **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
-首次构建预计提速 **20-30%**，后续构建通过 sccache 可提速 **40-60%**（基于并行代码生成、ThinLTO 与编译器缓存的理论估算）。
+首次构建预计提速 **20-30%**，后续构建通过缓存可进一步加速（基于并行代码生成与增量编译的理论估算）。
 
 ### 缓存策略 | Caching
 
@@ -119,7 +118,6 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 |------|------|------|
 | SDK | OpenWrt SDK 完整目录 | SDK URL hash |
 | Rust/Cargo | Cargo registry & git | 按周轮换 |
-| sccache | Rust 编译缓存 | 按周轮换 |
 | Feeds | OpenWrt feeds & packages | 按周轮换 |
 
 ## 常见问题 | FAQ
@@ -128,13 +126,19 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 - shadow-tls 本身代码量不多，但依赖链很重：主要依赖 `ring`，而 `ring` 会内置构建 BoringSSL/汇编优化代码，跨架构交叉编译时会完整编译一遍。
 - Rust 交叉编译会同时构建目标架构的标准库和所有依赖的 release 版本，首次构建需要下载/编译完整的 crate 栈。
-- 本仓库已启用 sccache、增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建会显著加速（命中缓存后通常缩短到几分钟级别）。
+- 本仓库已启用增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建会显著加速（命中缓存后通常缩短到几分钟级别）。
 
 ### 如何更换目标架构？ / How to change target architecture?
 
 修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL`，使用与目标设备匹配的 SDK。例如 aarch64 设备使用 `aarch64_cortex-a53` 对应的 SDK。
 
 Change `OPENWRT_SDK_URL` in `config/openwrt-sdk.conf` to point to the SDK matching your target device.
+
+### xray-plugin 编译失败？ / xray-plugin build fails?
+
+xray-plugin 可能因为其依赖 `github.com/sagernet/sing` 与较新版本的 Go（如 Go 1.25+）不兼容而编译失败，报错类似 `invalid reference to net.errNoSuchInterface`。这是上游依赖兼容性问题，需要等待 [openwrt-passwall-packages](https://github.com/Openwrt-Passwall/openwrt-passwall-packages) 更新 xray-plugin 或其依赖版本后才能解决。xray-plugin 编译失败不影响其他包的正常构建。
+
+xray-plugin may fail to build due to its dependency `github.com/sagernet/sing` being incompatible with newer Go versions (e.g. Go 1.25+), producing errors like `invalid reference to net.errNoSuchInterface`. This is an upstream dependency compatibility issue that requires [openwrt-passwall-packages](https://github.com/Openwrt-Passwall/openwrt-passwall-packages) to update xray-plugin or its dependencies. The xray-plugin build failure does not affect other packages.
 
 ### 安装失败怎么办？ / What if installation fails?
 
