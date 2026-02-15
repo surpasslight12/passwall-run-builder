@@ -72,15 +72,6 @@ jobs:
           key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
           restore-keys: ${{ env.CACHE_VERSION }}-rust-
 
-      - name: Cache sccache
-        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        id: cache-sccache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/sccache
-          key: ${{ env.CACHE_VERSION }}-sccache-${{ steps.cfg.outputs.week }}
-          restore-keys: ${{ env.CACHE_VERSION }}-sccache-
-
       - name: Cache feeds
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
         id: cache-feeds
@@ -161,13 +152,6 @@ jobs:
             || rustup target add x86_64-unknown-linux-musl
           rustc --version || die "Rust verification failed"
           cargo --version || die "Cargo verification failed"
-
-          if ! command -v sccache >/dev/null 2>&1; then
-            log_info "Installing sccache"
-            retry 3 20 cargo install sccache --locked
-          else
-            log_info "sccache already installed: $(sccache --version)"
-          fi
           group_end
 
           step_end
@@ -374,41 +358,10 @@ jobs:
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
           export CARGO_PROFILE_RELEASE_DEBUG=0
 
-          if command -v sccache >/dev/null 2>&1; then
-            export RUSTC_WRAPPER=sccache
-            export SCCACHE_DIR="$HOME/.cache/sccache"
-            mkdir -p "$SCCACHE_DIR"
-            if ! sccache --start-server 2>/dev/null; then
-              log_warn "sccache server failed to start, builds will proceed without caching"
-            else
-              log_info "sccache enabled for Rust compilation"
-            fi
-            # Write cargo config so sccache is used even when OpenWrt's
-            # build system overrides CARGO_HOME or filters env vars.
-            SCCACHE_BIN=$(command -v sccache)
-            for cargo_dir in "$HOME/.cargo" \
-                             "$(pwd)/staging_dir/host/.cargo" \
-                             "$(pwd)/build_dir/host/.cargo"; do
-              mkdir -p "$cargo_dir"
-              if [ ! -f "$cargo_dir/config.toml" ]; then
-                printf '[build]\nrustc-wrapper = "%s"\n' "$SCCACHE_BIN" > "$cargo_dir/config.toml"
-              elif ! grep -q 'rustc-wrapper' "$cargo_dir/config.toml"; then
-                if grep -q '^\[build\]' "$cargo_dir/config.toml"; then
-                  sed -i '/^\[build\]/a rustc-wrapper = "'"$SCCACHE_BIN"'"' "$cargo_dir/config.toml"
-                else
-                  printf '\n[build]\nrustc-wrapper = "%s"\n' "$SCCACHE_BIN" >> "$cargo_dir/config.toml"
-                fi
-              fi
-            done
-            log_info "Wrote rustc-wrapper to cargo config.toml"
-          fi
-
           log_info "RUSTFLAGS=$RUSTFLAGS"
           log_info "RUST_LTO_MODE=$RUST_LTO_MODE"
           log_info "CARGO_INCREMENTAL=$CARGO_INCREMENTAL"
           log_info "CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
-          log_info "RUSTC_WRAPPER=${RUSTC_WRAPPER:-<not set>}"
-          log_info "Rust env diag: SCCACHE_DIR=${SCCACHE_DIR:-<not set>} CARGO_NET_GIT_FETCH_WITH_CLI=${CARGO_NET_GIT_FETCH_WITH_CLI:-<not set>}"
 
           # 包分组 / Package groups
           C_PKGS=(dns2socks ipt2socks microsocks shadowsocks-libev shadowsocksr-libev simple-obfs tcping trojan-plus)
@@ -546,34 +499,6 @@ jobs:
             || die "Failed to compile luci-app-passwall"
           group_end
 
-          # sccache 统计 / sccache statistics
-          if command -v sccache >/dev/null 2>&1 && [ -n "${RUSTC_WRAPPER:-}" ]; then
-            group_start "sccache statistics"
-            SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
-            log_info "sccache stats:"
-            printf '%s\n' "$SCCACHE_STATS"
-            SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Compile requests /{print $NF}' | head -n1 | tr -d '[:space:]')
-            SCCACHE_HITS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Cache hits /{print $NF}' | head -n1 | tr -d '[:space:]')
-            SCCACHE_MISSES=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Cache misses /{print $NF}' | head -n1 | tr -d '[:space:]')
-            if [[ "$SCCACHE_REQUESTS" =~ ^[0-9]+$ ]]; then
-              if [ "$SCCACHE_REQUESTS" -eq 0 ]; then
-                log_warn "sccache compile requests are 0, Rust cache utility is limited in this run"
-              elif [[ "$SCCACHE_HITS" =~ ^[0-9]+$ ]] && [[ "$SCCACHE_MISSES" =~ ^[0-9]+$ ]]; then
-                SCCACHE_HIT_RATE=$(awk "BEGIN { printf \"%.2f\", ($SCCACHE_HITS / $SCCACHE_REQUESTS) * 100 }")
-                log_info "sccache cache hits=${SCCACHE_HITS}, misses=${SCCACHE_MISSES}, hit-rate=${SCCACHE_HIT_RATE}%"
-                if [ "$SCCACHE_HITS" -eq 0 ]; then
-                  log_warn "sccache has requests but zero cache hits, cache effectiveness is limited in this run"
-                fi
-              else
-                log_warn "Unable to parse sccache cache hits/misses from stats output"
-              fi
-            else
-              log_warn "Unable to parse sccache compile requests from stats output"
-            fi
-            group_end
-            gh_summary "### sccache statistics"$'\n'"\`\`\`text"$'\n'"$SCCACHE_STATS"$'\n'"\`\`\`"
-          fi
-
           log_info "Compilation complete: $TOTAL_OK deps + luci-app-passwall"
           step_end
 
@@ -703,13 +628,6 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
           key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
-
-      - name: Save sccache cache
-        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sccache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/sccache
-          key: ${{ env.CACHE_VERSION }}-sccache-${{ steps.cfg.outputs.week }}
 
       - name: Save feeds cache
         if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-feeds.outputs.cache-hit != 'true'
