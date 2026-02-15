@@ -383,6 +383,24 @@ jobs:
             else
               log_info "sccache enabled for Rust compilation"
             fi
+            # Write cargo config so sccache is used even when OpenWrt's
+            # build system overrides CARGO_HOME or filters env vars.
+            SCCACHE_BIN=$(command -v sccache)
+            for cargo_dir in "$HOME/.cargo" \
+                             "$(pwd)/staging_dir/host/.cargo" \
+                             "$(pwd)/build_dir/host/.cargo"; do
+              mkdir -p "$cargo_dir"
+              if [ ! -f "$cargo_dir/config.toml" ]; then
+                printf '[build]\nrustc-wrapper = "%s"\n' "$SCCACHE_BIN" > "$cargo_dir/config.toml"
+              elif ! grep -q 'rustc-wrapper' "$cargo_dir/config.toml"; then
+                if grep -q '^\[build\]' "$cargo_dir/config.toml"; then
+                  sed -i '/^\[build\]/a rustc-wrapper = "'"$SCCACHE_BIN"'"' "$cargo_dir/config.toml"
+                else
+                  printf '\n[build]\nrustc-wrapper = "%s"\n' "$SCCACHE_BIN" >> "$cargo_dir/config.toml"
+                fi
+              fi
+            done
+            log_info "Wrote rustc-wrapper to cargo config.toml"
           fi
 
           log_info "RUSTFLAGS=$RUSTFLAGS"
@@ -534,9 +552,9 @@ jobs:
             SCCACHE_STATS=$(sccache --show-stats 2>&1 || true)
             log_info "sccache stats:"
             printf '%s\n' "$SCCACHE_STATS"
-            SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Compile requests/{print $3}' | tail -n1 | tr -d '[:space:]')
-            SCCACHE_HITS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Cache hits/{print $3}' | tail -n1 | tr -d '[:space:]')
-            SCCACHE_MISSES=$(printf '%s\n' "$SCCACHE_STATS" | awk '/Cache misses/{print $3}' | tail -n1 | tr -d '[:space:]')
+            SCCACHE_REQUESTS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Compile requests /{print $NF}' | head -n1 | tr -d '[:space:]')
+            SCCACHE_HITS=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Cache hits /{print $NF}' | head -n1 | tr -d '[:space:]')
+            SCCACHE_MISSES=$(printf '%s\n' "$SCCACHE_STATS" | awk '/^Cache misses /{print $NF}' | head -n1 | tr -d '[:space:]')
             if [[ "$SCCACHE_REQUESTS" =~ ^[0-9]+$ ]]; then
               if [ "$SCCACHE_REQUESTS" -eq 0 ]; then
                 log_warn "sccache compile requests are 0, Rust cache utility is limited in this run"
