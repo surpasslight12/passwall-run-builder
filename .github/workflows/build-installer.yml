@@ -230,8 +230,7 @@ jobs:
           fi
 
           if [ "$FEEDS_CACHED" = "true" ] && [ -d feeds/packages ] && [ -d feeds/luci ]; then
-            log_info "Using cached feeds (index update only)"
-            ./scripts/feeds update -i
+            log_info "Using cached feeds"
           else
             log_info "Full feeds update"
             retry 3 30 ./scripts/feeds update -a || {
@@ -401,6 +400,14 @@ jobs:
             FEEDS_CACHE["$fname"]="$fpath"
           done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -print0 2>/dev/null)
 
+          add_timing() {
+            local group_label="$1" name="$2" status="$3" duration="$4"
+            local display_time="$duration"
+            [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
+            log_info "$name finished in ${display_time} ($status)"
+            PKG_TIMINGS+="${group_label}|${name}|${status}|${display_time}"$'\n'
+          }
+
           build_group() {
             local label="$1"; shift
             local ok=0 fail=0 t0 total_pkgs=0
@@ -412,14 +419,6 @@ jobs:
               log_info "No selected packages in $label, skipping"
               return
             fi
-
-            add_timing() {
-              local group_label="$1" name="$2" status="$3" duration="$4"
-              local display_time="$duration"
-              [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
-              log_info "$name finished in ${display_time} ($status)"
-              PKG_TIMINGS+="${group_label}|${name}|${status}|${display_time}"$'\n'
-            }
 
             group_start "Build $label (${total_pkgs} packages)"
             local idx=0
@@ -649,23 +648,30 @@ jobs:
         if: always()
         run: |
           source scripts/utils.sh
-          log_info "Go: $(go version 2>/dev/null || echo N/A)"
-          log_info "Rust: $(rustc --version 2>/dev/null || echo N/A)"
-          log_info "Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"
-          log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
+          GO_VER=$(go version 2>/dev/null || echo N/A)
+          RUST_VER=$(rustc --version 2>/dev/null || echo N/A)
+          DISK_AVAIL=$(df -h / --output=avail | tail -1 | tr -d ' ')
+          INSTALLER_INFO=""
           if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
-            log_info "Installer: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
+            INSTALLER_INFO="${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
+          fi
+          log_info "Go: $GO_VER"
+          log_info "Rust: $RUST_VER"
+          log_info "Disk: $DISK_AVAIL"
+          log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
+          if [ -n "$INSTALLER_INFO" ]; then
+            log_info "Installer: $INSTALLER_INFO"
           else
             log_warn "Installer: not built"
           fi
           {
             echo "### Build Info"
-            echo "- Go: $(go version 2>/dev/null || echo N/A)"
-            echo "- Rust: $(rustc --version 2>/dev/null || echo N/A)"
-            echo "- Disk: $(df -h / --output=avail | tail -1 | tr -d ' ')"
+            echo "- Go: $GO_VER"
+            echo "- Rust: $RUST_VER"
+            echo "- Disk: $DISK_AVAIL"
             echo "- SDK: \`${OPENWRT_SDK_URL:-not set}\`"
-            [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ] \
-              && echo "- Installer: ${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))" \
+            [ -n "$INSTALLER_INFO" ] \
+              && echo "- Installer: $INSTALLER_INFO" \
               || echo "- Installer: not built"
           } >> "$GITHUB_STEP_SUMMARY"
 
