@@ -286,6 +286,15 @@ jobs:
               sed -i 's/$(error go-/$(warning go-/g' "$COMPILER_MK"
               log_info "Patched golang-compiler.mk: CheckHost error → warning"
             fi
+            # Ensure Package/$(PKG_NAME)/Default has TITLE so BuildPackage passes.
+            # Some cached golang-version.mk versions omit TITLE on linux/amd64,
+            # causing "Package/golang1.26-misc is missing the TITLE field" errors.
+            GL_VERSION="feeds/packages/lang/golang/golang-version.mk"
+            if [ -f "$GL_VERSION" ] && ! grep -qF 'TITLE:=Go programming language' "$GL_VERSION"; then
+              awk '/^define Package\/\$\(PKG_NAME\)\/Default/ { print; print "  TITLE:=Go programming language"; next } { print }' \
+                "$GL_VERSION" > /tmp/gv-patched.mk && mv /tmp/gv-patched.mk "$GL_VERSION"
+              log_info "Patched golang-version.mk: added TITLE to Package/Default"
+            fi
             SYS_GO_BIN=$(command -v go 2>/dev/null || true)
             if [ -n "$SYS_GO_BIN" ]; then
               SYS_GO_VER=$("$SYS_GO_BIN" version 2>/dev/null | awk '{print $3}')
@@ -323,6 +332,9 @@ jobs:
                     for s in .configured .built .installed .stamp_configured .stamp_built .stamp_installed; do
                       touch "$GO126_BUILD/$s"
                     done
+                    # Create the host-install stamp so OpenWrt skips host/compile entirely
+                    mkdir -p "staging_dir/host/stamp"
+                    touch "staging_dir/host/stamp/.golang1.26_installed"
                   fi
                   ;;
               esac
