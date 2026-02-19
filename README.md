@@ -120,6 +120,10 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 | Rust/Cargo | Cargo registry & git | 按周轮换 |
 | Feeds | OpenWrt feeds & packages | 按周轮换 |
 
+每次构建在 **Cache analysis** 步骤中记录各缓存的命中状态与占用大小，结果写入 Actions Job Summary，便于排查缓存失效问题。
+
+Each build logs the hit/miss status and size of every cache layer in the **Cache analysis** step, written to the Actions Job Summary for easy cache-efficiency analysis.
+
 ## 常见问题 | FAQ
 
 ### 为什么 shadow-tls 体积不大却编译很久？

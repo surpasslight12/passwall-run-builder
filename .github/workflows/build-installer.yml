@@ -83,6 +83,17 @@ jobs:
           key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
           restore-keys: ${{ env.CACHE_VERSION }}-feeds-
 
+      # ── 缓存分析 / Cache analysis ──
+      - name: Cache analysis
+        run: |
+          source scripts/utils.sh
+          gh_summary "### Cache Status"
+          gh_summary "| Cache | Status | Size |"
+          gh_summary "| --- | --- | --- |"
+          cache_report "SDK"        "${{ steps.cache-sdk.outputs.cache-hit }}"  "openwrt-sdk"
+          cache_report "Rust/Cargo" "${{ steps.cache-rust.outputs.cache-hit }}" ~/.cargo/registry
+          cache_report "Feeds"      "${{ steps.cache-feeds.outputs.cache-hit }}" "openwrt-sdk/feeds"
+
       # ── 环境准备 / Setup environment ──
       - name: Setup environment
         run: |
