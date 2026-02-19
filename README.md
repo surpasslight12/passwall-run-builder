@@ -146,15 +146,17 @@ xray-plugin may fail to build due to its dependency `github.com/sagernet/sing` b
 
 ### golang1.26 host 包构建失败？ / golang1.26 host package build fails?
 
-当 `openwrt/packages` feed 将 `GO_DEFAULT_VERSION` 升级到 `1.26` 后，所有 Go 包都依赖 `golang1.26/host`，但其 Makefile 会在 `linux/amd64` 平台上触发解析期错误（`$(error go-1.26 cannot be installed on linux/amd64)`），导致全部 Go 包构建失败。
+当 `openwrt/packages` feed 将 `GO_DEFAULT_VERSION` 升级到 `1.26` 后，所有 Go 包都依赖 `golang1.26/host`，但其 Makefile 会在 `linux/amd64` 平台上触发多个问题，导致全部 Go 包构建失败。
 
 本仓库已在 `Apply patches` 阶段自动处理此问题：
 - 将 `golang-compiler.mk` 中 `CheckHost` 的 `$(error ...)` 改为 `$(warning ...)`，避免解析期报错
+- 若缓存版本的 `golang-version.mk` 在 `Package/$(PKG_NAME)/Default` 中缺少 `TITLE:=` 字段（会导致 `Package/golang1.26-misc is missing the TITLE field` 错误），自动补充该字段
 - 从 runner 已安装的系统 Go 1.26 直接预装 `golang1.26` host 包，跳过耗时的从源码编译步骤
+- 创建完整的 stamp 文件（包括 `staging_dir/host/stamp/.golang1.26_installed`），确保 OpenWrt 跳过 host/compile
 
-When `openwrt/packages` feed bumps `GO_DEFAULT_VERSION` to `1.26`, all Go packages depend on `golang1.26/host`, but its Makefile triggers a parse-time error on `linux/amd64` causing all Go packages to fail.
+When `openwrt/packages` feed bumps `GO_DEFAULT_VERSION` to `1.26`, all Go packages depend on `golang1.26/host`, but its Makefile triggers several issues on `linux/amd64` causing all Go packages to fail.
 
-This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk` and pre-installs the `golang1.26` host package from the runner's system Go 1.26, bypassing the slow source-compilation step.
+This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk`, patches `golang-version.mk` to ensure `TITLE` is set in `Package/$(PKG_NAME)/Default` (fixing "missing TITLE field" errors from cached feed versions), and pre-installs the `golang1.26` host package from the runner's system Go 1.26, creating all required stamp files to bypass both the parse-time errors and the slow source-compilation step.
 
 ### 安装失败怎么办？ / What if installation fails?
 
