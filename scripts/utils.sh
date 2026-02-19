@@ -126,3 +126,25 @@ gh_set_output() {
 gh_summary() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
 }
+
+# ── 缓存分析 / Cache analysis ──
+# Usage: cache_dir_size <path>  → prints human-readable size or "N/A"
+cache_dir_size() {
+  local path="$1"
+  [ -d "$path" ] && du -sh "$path" 2>/dev/null | cut -f1 || echo "N/A"
+}
+
+# Usage: cache_report <label> <hit> [<path>]
+# Logs cache hit/miss status and appends a markdown table row to GITHUB_STEP_SUMMARY.
+cache_report() {
+  local label="$1" hit="$2" path="${3:-}"
+  local icon status size="N/A"
+  if [ "$hit" = "true" ]; then
+    icon="✅"; status="hit"
+    [ -n "$path" ] && size=$(cache_dir_size "$path")
+  else
+    icon="❌"; status="miss"
+  fi
+  log_info "Cache [$label]: $status (size: $size)"
+  gh_summary "| $label | ${icon} ${status} | $size |"
+}
