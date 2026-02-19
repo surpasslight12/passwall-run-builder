@@ -140,6 +140,18 @@ xray-plugin 可能因为其依赖 `github.com/sagernet/sing` 与较新版本的 
 
 xray-plugin may fail to build due to its dependency `github.com/sagernet/sing` being incompatible with newer Go versions (e.g. Go 1.25+), producing errors like `invalid reference to net.errNoSuchInterface`. This is an upstream dependency compatibility issue that requires [openwrt-passwall-packages](https://github.com/Openwrt-Passwall/openwrt-passwall-packages) to update xray-plugin or its dependencies. The xray-plugin build failure does not affect other packages.
 
+### golang1.26 host 包构建失败？ / golang1.26 host package build fails?
+
+当 `openwrt/packages` feed 将 `GO_DEFAULT_VERSION` 升级到 `1.26` 后，所有 Go 包都依赖 `golang1.26/host`，但其 Makefile 会在 `linux/amd64` 平台上触发解析期错误（`$(error go-1.26 cannot be installed on linux/amd64)`），导致全部 Go 包构建失败。
+
+本仓库已在 `Apply patches` 阶段自动处理此问题：
+- 将 `golang-compiler.mk` 中 `CheckHost` 的 `$(error ...)` 改为 `$(warning ...)`，避免解析期报错
+- 从 runner 已安装的系统 Go 1.26 直接预装 `golang1.26` host 包，跳过耗时的从源码编译步骤
+
+When `openwrt/packages` feed bumps `GO_DEFAULT_VERSION` to `1.26`, all Go packages depend on `golang1.26/host`, but its Makefile triggers a parse-time error on `linux/amd64` causing all Go packages to fail.
+
+This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk` and pre-installs the `golang1.26` host package from the runner's system Go 1.26, bypassing the slow source-compilation step.
+
 ### 安装失败怎么办？ / What if installation fails?
 
 - 确认 `.run` 文件对应的架构与设备匹配
