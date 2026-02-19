@@ -265,6 +265,58 @@ jobs:
             sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$RUST_MK"
             log_info "Patched Rust download-ci-llvm"
           fi
+          # Fix golang1.26 host-package parse-time error on linux/amd64
+          # openwrt-packages sets GO_DEFAULT_VERSION:=1.26, so all Go packages now
+          # depend on golang1.26/host. Its Makefile fires $(error) at parse-time;
+          # change to $(warning) so parsing succeeds, then pre-install from system Go.
+          COMPILER_MK="feeds/packages/lang/golang/golang-compiler.mk"
+          if [ -d "feeds/packages/lang/golang/golang1.26" ] && [ -f "$COMPILER_MK" ]; then
+            if grep -q '$(error go-' "$COMPILER_MK"; then
+              sed -i 's/$(error go-/$(warning go-/g' "$COMPILER_MK"
+              log_info "Patched golang-compiler.mk: CheckHost error → warning"
+            fi
+            SYS_GO_BIN=$(command -v go 2>/dev/null || true)
+            if [ -n "$SYS_GO_BIN" ]; then
+              SYS_GO_VER=$("$SYS_GO_BIN" version 2>/dev/null | awk '{print $3}')
+              case "$SYS_GO_VER" in
+                go1.26*)
+                  SYS_GOROOT=$("$SYS_GO_BIN" env GOROOT 2>/dev/null || true)
+                  HOST_LIB="staging_dir/host/lib/go-1.26"
+                  GO126_BUILD="build_dir/hostpkg/go-1.26.0"
+                  if [ -n "$SYS_GOROOT" ] && [ -d "$SYS_GOROOT" ]; then
+                    # Copy Go files only if not already present (cache miss case)
+                    if [ ! -f "$HOST_LIB/bin/go" ]; then
+                      log_info "Pre-installing golang1.26 from system $SYS_GO_VER"
+                      mkdir -p "$HOST_LIB"
+                      cp -a "$SYS_GOROOT/." "$HOST_LIB/"
+                      # Remove host-arch prebuilt stdlib (per golang-version.mk Host/Install)
+                      rm -rf "$HOST_LIB/pkg/linux_amd64" 2>/dev/null || true
+                      # Install openwrt gcc-wrapper used by Go cross-compile
+                      GCC_HELPER="feeds/packages/lang/golang/go-gcc-helper"
+                      if [ -f "$GCC_HELPER" ]; then
+                        mkdir -p "$HOST_LIB/openwrt"
+                        install -m 755 "$GCC_HELPER" "$HOST_LIB/openwrt/"
+                        [ -L "$HOST_LIB/openwrt/gcc" ]  || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/gcc"
+                        [ -L "$HOST_LIB/openwrt/g++" ]  || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/g++"
+                      fi
+                      # Create BinLinks in staging_dir/host/bin/
+                      mkdir -p "staging_dir/host/bin"
+                      [ -L "staging_dir/host/bin/go1.26" ]    || ln -sf "../lib/go-1.26/bin/go"    "staging_dir/host/bin/go1.26"
+                      [ -L "staging_dir/host/bin/gofmt1.26" ] || ln -sf "../lib/go-1.26/bin/gofmt" "staging_dir/host/bin/gofmt1.26"
+                      log_info "golang1.26 pre-installed → $HOST_LIB"
+                    else
+                      log_info "golang1.26 already at $HOST_LIB (cached)"
+                    fi
+                    # Always (re)create stamp files so OpenWrt skips compilation
+                    mkdir -p "$GO126_BUILD"
+                    for s in .configured .built .installed .stamp_configured .stamp_built .stamp_installed; do
+                      touch "$GO126_BUILD/$s"
+                    done
+                  fi
+                  ;;
+              esac
+            fi
+          fi
           group_end
 
           # 克隆 PassWall / Clone PassWall
