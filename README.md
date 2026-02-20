@@ -9,11 +9,11 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 从 OpenWrt SDK 交叉编译全部依赖（C/C++、Go、Rust、预编译）
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
-- 每次执行完整构建（不使用任何缓存机制）
+- 每次执行完整构建，无增量编译，确保产物一致性
 - **Rust 编译优化**（并行代码生成、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
-- 每日自动检查上游 PassWall 稳定版并在有新版本时自动打去掉前缀 `v` 的版本 tag（如 `26.2.6-1`）触发构建
+- 每日自动检查上游 PassWall 稳定版并在有新版本时自动触发构建
 
 ## 快速开始 | Quick Start
 
@@ -35,7 +35,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ```
 ├── .github/workflows/
-│   ├── build-installer.yml    # 构建工作流（单文件多步骤）/ Build workflow (single file, multi-step)
+│   ├── build-installer.yml    # 构建工作流（单文件多步骤）
 │   └── sync-passwall-tag.yml  # 每日同步上游稳定版 tag
 ├── config/
 │   ├── openwrt-sdk.conf       # SDK URL 配置
@@ -52,24 +52,22 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 ### `config/openwrt-sdk.conf`
 
 | 变量 Variable | 必填 Required | 说明 Description |
-|------|------|------|
-| `OPENWRT_SDK_URL` | ✅ | SDK 下载地址 / SDK download URL |
-| `PASSWALL_LUCI_REF` | ❌ | 固定 PassWall 版本（如 `v26.1.21`）/ Pin PassWall version |
+|---------------|---------------|------------------|
+| `OPENWRT_SDK_URL` | ✅ | SDK 下载地址 |
+| `PASSWALL_LUCI_REF` | ❌ | 固定 PassWall 版本（如 `v26.1.21`） |
 
 ### `config/packages.conf`
 
 每行一个包名，`#` 开头为注释。工作流的编译和收集步骤都会按此列表执行，避免“选择了但未编译/未收集”的不一致。
 
-One package name per line. Lines starting with `#` are comments.
-
 ### Workflow 手动触发参数 | Workflow Dispatch Inputs
 
-手动触发 workflow 时无额外输入参数，工作流始终执行完整构建（不依赖缓存）。
+手动触发 workflow 时无额外输入参数，工作流始终执行完整构建。
 
 ## 系统要求 | Requirements
 
-- OpenWrt **25.12+**（APK 包管理器 / APK package manager）
-- SDK 架构必须与目标设备一致 / SDK architecture must match target device
+- OpenWrt **25.12+**（APK 包管理器）
+- SDK 架构必须与目标设备一致
 - GitHub Actions runner（`ubuntu-latest`）
 
 ## 构建流程 | Build Pipeline
@@ -83,16 +81,14 @@ build-installer.yml (single file, multi-step)
 
 所有构建逻辑内联在 `build-installer.yml` 工作流的各个步骤中，共享函数通过 `scripts/utils.sh` 提供。
 
-All build logic is inlined in `build-installer.yml` workflow steps, with shared functions provided by `scripts/utils.sh`.
-
-编译按工具链分组进行（按源码目录构建，子包共享同一源码目录）/ Compilation is grouped by toolchain (built by source directory; subpackages share the same source directory):
+编译按工具链分组进行（按源码目录构建，子包共享同一源码目录）：
 
 | 分组 Group | 包 Packages |
-|------|------|
-| Rust | shadow-tls, shadowsocks-rust |
-| Go | geoview, hysteria, sing-box, v2ray-plugin, xray-core, xray-plugin |
-| C/C++ | dns2socks, ipt2socks, microsocks, shadowsocks-libev（产出 `shadowsocks-libev-*`）, shadowsocksr-libev（产出 `shadowsocksr-libev-*`）, simple-obfs（产出 `simple-obfs-client`）, tcping, trojan-plus |
-| Prebuilt | chinadns-ng, naiveproxy, tuic-client, v2ray-geodata（产出 `v2ray-geoip`/`v2ray-geosite`） |
+|------------|-------------|
+| Rust       | shadow-tls, shadowsocks-rust |
+| Go         | geoview, hysteria, sing-box, v2ray-plugin, xray-core, xray-plugin |
+| C/C++      | dns2socks, ipt2socks, microsocks, shadowsocks-libev, shadowsocksr-libev, simple-obfs, tcping, trojan-plus |
+| Prebuilt   | chinadns-ng, naiveproxy, tuic-client, v2ray-geodata |
 
 ## 性能优化 | Performance
 
@@ -100,15 +96,13 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 自动应用以下优化以加快 Rust 组件编译：
 
-- **增量编译**: 禁用 `CARGO_INCREMENTAL=0`，避免在无缓存的 CI 中生成无用增量产物占用磁盘
-- **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡（可通过 `RUST_CODEGEN_UNITS` 覆盖）
-- **LTO 可选**: 默认关闭 `-C lto`（`RUST_LTO_MODE=off`），避免 OpenWrt Rust host 引导阶段与 `embed-bitcode=no` 冲突；可通过 `RUST_LTO_MODE=thin/fat` 显式开启
-- **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
+- **增量编译**: 禁用 `CARGO_INCREMENTAL=0`，避免生成无用增量产物占用磁盘
+- **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡
+- **LTO 可选**: 默认关闭 `-C lto`，避免与 `embed-bitcode=no` 冲突，可通过 `RUST_LTO_MODE=thin/fat` 显式开启
+- **优化级别**: 默认 `-C opt-level=3`，提升运行时性能
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
-由于每次构建均为全新流程（无 Build Cache），增量编译已禁用；并行代码生成可在单次构建中减少 Rust 组件的编译时间（实际效果视组件与依赖而定）。
-
-> 注意：本仓库已移除缓存设计。每次构建将从头开始执行完整流程，以避免缓存带来的架构/依赖不一致问题。
+由于每次构建均为全新流程（无 Build Cache），增量编译已禁用；并行代码生成可减少 Rust 组件的编译时间。
 
 ## 常见问题 | FAQ
 
@@ -118,38 +112,13 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 - Rust 交叉编译会同时构建目标架构的标准库和所有依赖的 release 版本，首次构建需要下载/编译完整的 crate 栈。
 - 本仓库启用了并行代码生成（`-C codegen-units=8`）并禁用了增量编译（每次均为全新构建，无缓存复用）。Rust 组件（尤其是 shadow-tls、shadowsocks-rust）首次编译耗时较长属正常现象。
 
-### 如何更换目标架构？ / How to change target architecture?
+### 如何更换目标架构？
 
 修改 `config/openwrt-sdk.conf` 中的 `OPENWRT_SDK_URL`，使用与目标设备匹配的 SDK。例如 aarch64 设备使用 `aarch64_cortex-a53` 对应的 SDK。
 
-Change `OPENWRT_SDK_URL` in `config/openwrt-sdk.conf` to point to the SDK matching your target device.
-
-### xray-plugin 编译失败？ / xray-plugin build fails?
+### xray-plugin 编译失败？
 
 xray-plugin 可能因为其依赖 `github.com/sagernet/sing` 与较新版本的 Go（如 Go 1.25+）不兼容而编译失败，报错类似 `invalid reference to net.errNoSuchInterface`。这是上游依赖兼容性问题，需要等待 [openwrt-passwall-packages](https://github.com/Openwrt-Passwall/openwrt-passwall-packages) 更新 xray-plugin 或其依赖版本后才能解决。xray-plugin 编译失败不影响其他包的正常构建。
-
-xray-plugin may fail to build due to its dependency `github.com/sagernet/sing` being incompatible with newer Go versions (e.g. Go 1.25+), producing errors like `invalid reference to net.errNoSuchInterface`. This is an upstream dependency compatibility issue that requires [openwrt-passwall-packages](https://github.com/Openwrt-Passwall/openwrt-passwall-packages) to update xray-plugin or its dependencies. The xray-plugin build failure does not affect other packages.
-
-### golang1.26 host 包构建失败？ / golang1.26 host package build fails?
-
-当 `openwrt/packages` feed 将 `GO_DEFAULT_VERSION` 升级到 `1.26` 后，所有 Go 包都依赖 `golang1.26/host`，但其 Makefile 会在 `linux/amd64` 平台上触发多个问题，导致全部 Go 包构建失败。
-
-本仓库已在 `Apply patches` 阶段自动处理此问题：
-- 将 `golang-compiler.mk` 中 `CheckHost` 的 `$(error ...)` 改为 `$(warning ...)`，避免解析期报错
-- 若某个版本的 `golang-version.mk` 在 `Package/$(PKG_NAME)/Default` 中缺少 `TITLE:=` 字段（会导致 `Package/golang1.26-misc is missing the TITLE field` 错误），自动补充该字段
-- 从 runner 已安装的系统 Go 1.26 直接预装 `golang1.26` host 包，跳过耗时的从源码编译步骤
-- 创建完整的 stamp 文件（包括 `staging_dir/host/stamp/.golang1.26_installed`），确保 OpenWrt 跳过 host/compile
-
-When `openwrt/packages` feed bumps `GO_DEFAULT_VERSION` to `1.26`, all Go packages depend on `golang1.26/host`, but its Makefile triggers several issues on `linux/amd64` causing all Go packages to fail.
-
-This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk`, patches `golang-version.mk` to ensure `TITLE` is set in `Package/$(PKG_NAME)/Default` (fixing "missing TITLE field" errors), and pre-installs the `golang1.26` host package from the runner's system Go 1.26, creating all required stamp files to bypass both the parse-time errors and the slow source-compilation step.
-
-### 安装失败怎么办？ / What if installation fails?
-
-- 确认 `.run` 文件对应的架构与设备匹配
-- 确认设备运行 OpenWrt 25.12+（使用 APK 包管理器）
-- 检查设备存储空间是否充足（`df -h`）
-- 查看安装日志定位具体错误
 
 ## License
 
