@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CACHE_VERSION: v1
+  CACHE_VERSION: v2
   MIN_REQUIRED_PACKAGES: '15'
   MAX_ALLOWED_FAILURES: '5'
 
@@ -69,8 +69,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
-          restore-keys: ${{ env.CACHE_VERSION }}-rust-
+          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-
+            ${{ env.CACHE_VERSION }}-rust-
 
       - name: Cache feeds
         if: github.event_name != 'workflow_dispatch' || inputs.use_cache
@@ -80,19 +82,33 @@ jobs:
           path: |
             openwrt-sdk/feeds
             openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
-          restore-keys: ${{ env.CACHE_VERSION }}-feeds-
+          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-
+            ${{ env.CACHE_VERSION }}-feeds-
+
+      - name: Cache Go modules
+        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
+        id: cache-gomod
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ env.CACHE_VERSION }}-gomod-${{ steps.cfg.outputs.week }}
+          restore-keys: ${{ env.CACHE_VERSION }}-gomod-
 
       # ── 缓存分析 / Cache analysis ──
       - name: Cache analysis
         run: |
           source scripts/utils.sh
           gh_summary "### Cache Status"
-          gh_summary "| Cache | Status | Size |"
-          gh_summary "| --- | --- | --- |"
-          cache_report "SDK"        "${{ steps.cache-sdk.outputs.cache-hit }}"  "openwrt-sdk"
-          cache_report "Rust/Cargo" "${{ steps.cache-rust.outputs.cache-hit }}" ~/.cargo/registry
-          cache_report "Feeds"      "${{ steps.cache-feeds.outputs.cache-hit }}" "openwrt-sdk/feeds"
+          gh_summary "| Cache | Key Strategy | Status | Size |"
+          gh_summary "| --- | --- | --- | --- |"
+          cache_report "SDK"        "sdk-hash"          "${{ steps.cache-sdk.outputs.cache-hit }}"    "openwrt-sdk"
+          cache_report "Rust/Cargo" "sdk-hash + week"   "${{ steps.cache-rust.outputs.cache-hit }}"   ~/.cargo/registry
+          cache_report "Feeds"      "sdk-hash + week"   "${{ steps.cache-feeds.outputs.cache-hit }}"  "openwrt-sdk/feeds"
+          cache_report "Go modules" "week"              "${{ steps.cache-gomod.outputs.cache-hit }}"  ~/go/pkg/mod
 
       # ── 环境准备 / Setup environment ──
       - name: Setup environment
@@ -701,7 +717,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.week }}
+          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
 
       - name: Save feeds cache
         if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-feeds.outputs.cache-hit != 'true'
@@ -710,7 +726,16 @@ jobs:
           path: |
             openwrt-sdk/feeds
             openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.week }}
+          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
+
+      - name: Save Go modules cache
+        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-gomod.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ env.CACHE_VERSION }}-gomod-${{ steps.cfg.outputs.week }}
 
       # ── 发布 / Publish ──
       - name: Upload artifact

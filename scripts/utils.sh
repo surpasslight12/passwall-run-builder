@@ -134,10 +134,10 @@ cache_dir_size() {
   [ -d "$path" ] && du -sh "$path" 2>/dev/null | cut -f1 || echo "N/A"
 }
 
-# Usage: cache_report <label> <hit> [<path>]
-# Logs cache hit/miss status and appends a markdown table row to GITHUB_STEP_SUMMARY.
+# Usage: cache_report <label> <key_strategy> <hit> [<path>]
+# Logs cache hit/miss status and appends a 4-column markdown table row to GITHUB_STEP_SUMMARY.
 cache_report() {
-  local label="$1" hit="$2" path="${3:-}"
+  local label="$1" key_strategy="$2" hit="$3" path="${4:-}"
   local icon status size="N/A"
   if [ "$hit" = "true" ]; then
     icon="✅"; status="hit"
@@ -145,6 +145,6 @@ cache_report() {
   else
     icon="❌"; status="miss"
   fi
-  log_info "Cache [$label]: $status (size: $size)"
-  gh_summary "| $label | ${icon} ${status} | $size |"
+  log_info "Cache [$label/$key_strategy]: $status (size: $size)"
+  gh_summary "| $label | $key_strategy | ${icon} ${status} | $size |"
 }

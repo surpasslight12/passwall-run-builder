@@ -9,7 +9,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 从 OpenWrt SDK 交叉编译全部依赖（C/C++、Go、Rust、预编译）
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
-- 三层缓存（SDK / Rust / Feeds）加速构建
+- 四层缓存（SDK / Rust / Feeds / Go Modules）加速构建，Rust 与 Feeds 缓存 key 包含 SDK hash，避免跨架构污染
 - **Rust 编译优化**（增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
@@ -114,15 +114,16 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 ### 缓存策略 | Caching
 
-| 缓存 Cache | 内容 Content | Key |
+| 缓存 Cache | 内容 Content | Key 策略 Key Strategy |
 |------|------|------|
-| SDK | OpenWrt SDK 完整目录 | SDK URL hash |
-| Rust/Cargo | Cargo registry & git | 按周轮换 |
-| Feeds | OpenWrt feeds & packages | 按周轮换 |
+| SDK | OpenWrt SDK 完整目录（含 build_dir/staging_dir 编译产物，支持增量编译）| SDK URL hash |
+| Rust/Cargo | Cargo registry & git | SDK hash + 周轮换，不同架构独立缓存 |
+| Feeds | OpenWrt feeds & packages | SDK hash + 周轮换，不同架构独立缓存 |
+| Go modules | Go 模块缓存（`~/go/pkg/mod` + `~/.cache/go-build`）| 按周轮换 |
 
-每次构建在 **Cache analysis** 步骤中记录各缓存的命中状态与占用大小，结果写入 Actions Job Summary，便于排查缓存失效问题。
+每次构建在 **Cache analysis** 步骤中记录各缓存的命中状态、key 策略与占用大小，结果写入 Actions Job Summary，便于排查缓存失效问题。
 
-Each build logs the hit/miss status and size of every cache layer in the **Cache analysis** step, written to the Actions Job Summary for easy cache-efficiency analysis.
+Each build logs the hit/miss status, key strategy and size of every cache layer in the **Cache analysis** step, written to the Actions Job Summary for easy cache-efficiency analysis.
 
 ## 常见问题 | FAQ
 
