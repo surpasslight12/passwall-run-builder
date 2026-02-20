@@ -41,8 +41,6 @@ jobs:
             [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && { echo "$line" >> "$GITHUB_ENV"; export "$line"; }
           done < config/openwrt-sdk.conf
           [ -n "${OPENWRT_SDK_URL:-}" ] || { echo "::error::OPENWRT_SDK_URL not set"; exit 1; }
-          echo "sdk-hash=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-          echo "week=$(date +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       # ── 环境准备 / Setup environment ──
       - name: Setup environment
@@ -50,7 +48,6 @@ jobs:
           source scripts/utils.sh
           step_start "Setup environment"
           export DEBIAN_FRONTEND=noninteractive
-
 
           group_start "Install build dependencies"
           sudo apt-get update -qq
@@ -356,7 +353,7 @@ jobs:
           RUST_EXTRA_FLAGS="-C codegen-units=${RUST_CODEGEN_UNITS} -C opt-level=${RUST_OPT_LEVEL}"
           [ "$RUST_LTO_MODE" != "off" ] && RUST_EXTRA_FLAGS+=" -C lto=${RUST_LTO_MODE}"
           export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }${RUST_EXTRA_FLAGS}"
-          export CARGO_INCREMENTAL=1
+          export CARGO_INCREMENTAL=0
           export CARGO_NET_GIT_FETCH_WITH_CLI=true
           export CARGO_PROFILE_RELEASE_DEBUG=0
 

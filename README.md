@@ -10,7 +10,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
 - 每次执行完整构建（不使用任何缓存机制）
-- **Rust 编译优化**（增量编译、优化 RUSTFLAGS）
+- **Rust 编译优化**（并行代码生成、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
 - 每日自动检查上游 PassWall 稳定版并在有新版本时自动打去掉前缀 `v` 的版本 tag（如 `26.2.6-1`）触发构建
@@ -100,13 +100,13 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 自动应用以下优化以加快 Rust 组件编译：
 
-- **增量编译**: 启用 `CARGO_INCREMENTAL=1`
+- **增量编译**: 禁用 `CARGO_INCREMENTAL=0`，避免在无缓存的 CI 中生成无用增量产物占用磁盘
 - **并行代码生成**: 默认 `-C codegen-units=8`，在编译时间与运行时性能间平衡（可通过 `RUST_CODEGEN_UNITS` 覆盖）
 - **LTO 可选**: 默认关闭 `-C lto`（`RUST_LTO_MODE=off`），避免 OpenWrt Rust host 引导阶段与 `embed-bitcode=no` 冲突；可通过 `RUST_LTO_MODE=thin/fat` 显式开启
 - **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
-首次构建通过增量编译与并行代码生成可显著优化编译时间（实际效果视组件与依赖而定）。
+由于每次构建均为全新流程（无 Build Cache），增量编译已禁用；并行代码生成可在单次构建中减少 Rust 组件的编译时间（实际效果视组件与依赖而定）。
 
 > 注意：本仓库已移除缓存设计。每次构建将从头开始执行完整流程，以避免缓存带来的架构/依赖不一致问题。
 
@@ -116,7 +116,7 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 
 - shadow-tls 本身代码量不多，但依赖链很重：主要依赖 `ring`，而 `ring` 会内置构建 BoringSSL/汇编优化代码，跨架构交叉编译时会完整编译一遍。
 - Rust 交叉编译会同时构建目标架构的标准库和所有依赖的 release 版本，首次构建需要下载/编译完整的 crate 栈。
-- 本仓库已启用增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建可见到时间改善。
+- 本仓库启用了并行代码生成（`-C codegen-units=8`）并禁用了增量编译（每次均为全新构建，无缓存复用）。Rust 组件（尤其是 shadow-tls、shadowsocks-rust）首次编译耗时较长属正常现象。
 
 ### 如何更换目标架构？ / How to change target architecture?
 
