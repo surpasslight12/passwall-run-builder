@@ -1,0 +1,10 @@
+extends: default
+
+rules:
+  # 项目中存在较多长注释与长命令，默认 80 列会产生大量无害警告。
+  # 这里禁用 line-length 规则以减少噪音；若需要，可按需重新启用并设定阈值。
+  line-length: disable
+  # Allow GitHub Actions style files without explicit document start
+  document-start: disable
+  # Relax boolean 'truthy' checks to avoid warnings for common workflow boolean forms
+  truthy: disable

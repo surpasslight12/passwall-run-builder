@@ -88,9 +88,6 @@ jobs:
               owner,
               repo,
               workflow_id: 'build-installer.yml',
-              ref: `refs/tags/${tag}`,
-              inputs: {
-                use_cache: 'true'
-              }
+              ref: `refs/tags/${tag}`
             })
             core.info(`Triggered build-installer.yml on tag ${tag}.`)

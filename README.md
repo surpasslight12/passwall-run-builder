@@ -9,7 +9,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 从 OpenWrt SDK 交叉编译全部依赖（C/C++、Go、Rust、预编译）
 - 生成自解压 `.run` 安装包，一键部署到 OpenWrt 设备
 - 支持自定义 SDK 版本、架构和 PassWall 版本
-- 四层缓存（SDK / Rust / Feeds / Go Modules）加速构建，Rust 与 Feeds 缓存 key 包含 SDK hash，避免跨架构污染
+- 每次执行完整构建（不使用任何缓存机制）
 - **Rust 编译优化**（增量编译、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
@@ -64,11 +64,7 @@ One package name per line. Lines starting with `#` are comments.
 
 ### Workflow 手动触发参数 | Workflow Dispatch Inputs
 
-手动触发 workflow 时可配置以下参数：
-
-| 参数 Input | 默认值 Default | 说明 Description |
-|------|------|------|
-| `use_cache` | `true` | 是否启用缓存（checkbox）/ Enable caching (checkbox) |
+手动触发 workflow 时无额外输入参数，工作流始终执行完整构建（不依赖缓存）。
 
 ## 系统要求 | Requirements
 
@@ -110,20 +106,9 @@ All build logic is inlined in `build-installer.yml` workflow steps, with shared 
 - **优化级别**: 默认 `-C opt-level=3`，提升运行时性能（可通过 `RUST_OPT_LEVEL` 覆盖）
 - **减少调试信息**: `CARGO_PROFILE_RELEASE_DEBUG=0` 加速编译和链接
 
-首次构建预计提速 **20-30%**，后续构建通过缓存可进一步加速（基于并行代码生成与增量编译的理论估算）。
+首次构建通过增量编译与并行代码生成可显著优化编译时间（实际效果视组件与依赖而定）。
 
-### 缓存策略 | Caching
-
-| 缓存 Cache | 内容 Content | Key 策略 Key Strategy |
-|------|------|------|
-| SDK | OpenWrt SDK 完整目录（含 build_dir/staging_dir 编译产物，支持增量编译）| SDK URL hash |
-| Rust/Cargo | Cargo registry & git | SDK hash + 周轮换，不同架构独立缓存 |
-| Feeds | OpenWrt feeds & packages | SDK hash + 周轮换，不同架构独立缓存 |
-| Go modules | Go 模块缓存（`~/go/pkg/mod` + `~/.cache/go-build`）| 按周轮换 |
-
-每次构建在 **Cache analysis** 步骤中记录各缓存的命中状态、key 策略与占用大小，结果写入 Actions Job Summary，便于排查缓存失效问题。
-
-Each build logs the hit/miss status, key strategy and size of every cache layer in the **Cache analysis** step, written to the Actions Job Summary for easy cache-efficiency analysis.
+> 注意：本仓库已移除缓存设计。每次构建将从头开始执行完整流程，以避免缓存带来的架构/依赖不一致问题。
 
 ## 常见问题 | FAQ
 
@@ -131,7 +116,7 @@ Each build logs the hit/miss status, key strategy and size of every cache layer 
 
 - shadow-tls 本身代码量不多，但依赖链很重：主要依赖 `ring`，而 `ring` 会内置构建 BoringSSL/汇编优化代码，跨架构交叉编译时会完整编译一遍。
 - Rust 交叉编译会同时构建目标架构的标准库和所有依赖的 release 版本，首次构建需要下载/编译完整的 crate 栈。
-- 本仓库已启用增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建会显著加速（命中缓存后通常缩短到几分钟级别）。
+- 本仓库已启用增量编译和并行代码生成，首次构建耗时较长属正常现象；后续构建可见到时间改善。
 
 ### 如何更换目标架构？ / How to change target architecture?
 
@@ -151,13 +136,13 @@ xray-plugin may fail to build due to its dependency `github.com/sagernet/sing` b
 
 本仓库已在 `Apply patches` 阶段自动处理此问题：
 - 将 `golang-compiler.mk` 中 `CheckHost` 的 `$(error ...)` 改为 `$(warning ...)`，避免解析期报错
-- 若缓存版本的 `golang-version.mk` 在 `Package/$(PKG_NAME)/Default` 中缺少 `TITLE:=` 字段（会导致 `Package/golang1.26-misc is missing the TITLE field` 错误），自动补充该字段
+- 若某个版本的 `golang-version.mk` 在 `Package/$(PKG_NAME)/Default` 中缺少 `TITLE:=` 字段（会导致 `Package/golang1.26-misc is missing the TITLE field` 错误），自动补充该字段
 - 从 runner 已安装的系统 Go 1.26 直接预装 `golang1.26` host 包，跳过耗时的从源码编译步骤
 - 创建完整的 stamp 文件（包括 `staging_dir/host/stamp/.golang1.26_installed`），确保 OpenWrt 跳过 host/compile
 
 When `openwrt/packages` feed bumps `GO_DEFAULT_VERSION` to `1.26`, all Go packages depend on `golang1.26/host`, but its Makefile triggers several issues on `linux/amd64` causing all Go packages to fail.
 
-This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk`, patches `golang-version.mk` to ensure `TITLE` is set in `Package/$(PKG_NAME)/Default` (fixing "missing TITLE field" errors from cached feed versions), and pre-installs the `golang1.26` host package from the runner's system Go 1.26, creating all required stamp files to bypass both the parse-time errors and the slow source-compilation step.
+This repository automatically handles this in the `Apply patches` phase: it changes `$(error ...)` to `$(warning ...)` in `golang-compiler.mk`, patches `golang-version.mk` to ensure `TITLE` is set in `Package/$(PKG_NAME)/Default` (fixing "missing TITLE field" errors), and pre-installs the `golang1.26` host package from the runner's system Go 1.26, creating all required stamp files to bypass both the parse-time errors and the slow source-compilation step.
 
 ### 安装失败怎么办？ / What if installation fails?
 

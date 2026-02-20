@@ -4,19 +4,12 @@ on:
   push:
     tags: ['[0-9]*.[0-9]*.[0-9]*-[0-9]*']
   workflow_dispatch:
-    inputs:
-      use_cache:
-        description: 'Enable caching'
-        type: boolean
-        required: false
-        default: true
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  CACHE_VERSION: v2
   MIN_REQUIRED_PACKAGES: '15'
   MAX_ALLOWED_FAILURES: '5'
 
@@ -50,65 +43,6 @@ jobs:
           [ -n "${OPENWRT_SDK_URL:-}" ] || { echo "::error::OPENWRT_SDK_URL not set"; exit 1; }
           echo "sdk-hash=$(echo "$OPENWRT_SDK_URL" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
           echo "week=$(date +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-      # ── 缓存恢复 / Restore caches ──
-      - name: Cache SDK
-        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        id: cache-sdk
-        uses: actions/cache/restore@v4
-        with:
-          path: openwrt-sdk
-          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cfg.outputs.sdk-hash }}
-          restore-keys: ${{ env.CACHE_VERSION }}-sdk-
-
-      - name: Cache Rust/Cargo
-        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        id: cache-rust
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-
-            ${{ env.CACHE_VERSION }}-rust-
-
-      - name: Cache feeds
-        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        id: cache-feeds
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            openwrt-sdk/feeds
-            openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-
-            ${{ env.CACHE_VERSION }}-feeds-
-
-      - name: Cache Go modules
-        if: github.event_name != 'workflow_dispatch' || inputs.use_cache
-        id: cache-gomod
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ env.CACHE_VERSION }}-gomod-${{ steps.cfg.outputs.week }}
-          restore-keys: ${{ env.CACHE_VERSION }}-gomod-
-
-      # ── 缓存分析 / Cache analysis ──
-      - name: Cache analysis
-        run: |
-          source scripts/utils.sh
-          gh_summary "### Cache Status"
-          gh_summary "| Cache | Key Strategy | Status | Size |"
-          gh_summary "| --- | --- | --- | --- |"
-          cache_report "SDK"        "sdk-hash"          "${{ steps.cache-sdk.outputs.cache-hit }}"    "openwrt-sdk"
-          cache_report "Rust/Cargo" "sdk-hash + week"   "${{ steps.cache-rust.outputs.cache-hit }}"   ~/.cargo/registry
-          cache_report "Feeds"      "sdk-hash + week"   "${{ steps.cache-feeds.outputs.cache-hit }}"  "openwrt-sdk/feeds"
-          cache_report "Go modules" "week"              "${{ steps.cache-gomod.outputs.cache-hit }}"  ~/go/pkg/mod
 
       # ── 环境准备 / Setup environment ──
       - name: Setup environment
@@ -189,31 +123,24 @@ jobs:
           source scripts/utils.sh
           step_start "Setup SDK"
 
-          SDK_CACHE_HIT="${{ steps.cache-sdk.outputs.cache-hit }}"
-
-          if [ "$SDK_CACHE_HIT" = "true" ] && [ -f openwrt-sdk/Makefile ]; then
-            log_info "Using cached SDK"
-            rm -rf openwrt-sdk/bin/packages/* openwrt-sdk/.config openwrt-sdk/.config.old 2>/dev/null || true
-          else
-            group_start "Download SDK"
-            rm -rf openwrt-sdk
-            mkdir -p openwrt-sdk
-            cd openwrt-sdk
-            SDK_FILE=$(basename "$OPENWRT_SDK_URL")
-            log_info "Downloading $SDK_FILE"
-            retry 3 30 wget -q "$OPENWRT_SDK_URL" -O "$SDK_FILE"
-            [ -f "$SDK_FILE" ] || die "Download failed"
-            log_info "Extracting…"
-            case "$SDK_FILE" in
-              *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
-              *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
-              *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
-              *)         die "Unsupported archive: $SDK_FILE" ;;
-            esac
-            rm -f "$SDK_FILE"
-            cd ..
-            group_end
-          fi
+          group_start "Download SDK"
+          rm -rf openwrt-sdk
+          mkdir -p openwrt-sdk
+          cd openwrt-sdk
+          SDK_FILE=$(basename "$OPENWRT_SDK_URL")
+          log_info "Downloading $SDK_FILE"
+          retry 3 30 wget -q "$OPENWRT_SDK_URL" -O "$SDK_FILE"
+          [ -f "$SDK_FILE" ] || die "Download failed"
+          log_info "Extracting…"
+          case "$SDK_FILE" in
+            *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
+            *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
+            *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
+            *)         die "Unsupported archive: $SDK_FILE" ;;
+          esac
+          rm -f "$SDK_FILE"
+          cd ..
+          group_end
 
           # 替换 SDK 内置 Go / Replace SDK bundled Go
           group_start "Update SDK Go"
@@ -243,9 +170,7 @@ jobs:
           step_start "Configure feeds"
 
           cd openwrt-sdk
-          FEEDS_CACHED="${{ steps.cache-feeds.outputs.cache-hit }}"
 
-          # 配置 feeds / Configure feeds
           group_start "Configure feeds"
           if [ -f feeds.conf.default ]; then
             cp feeds.conf.default feeds.conf
@@ -256,22 +181,18 @@ jobs:
           EOF
           fi
 
-          if [ "$FEEDS_CACHED" = "true" ] && [ -d feeds/packages ] && [ -d feeds/luci ]; then
-            log_info "Using cached feeds"
-          else
-            log_info "Full feeds update"
-            retry 3 30 ./scripts/feeds update -a || {
-              log_warn "Feed update failed, trying GitHub mirrors"
-              sed -i \
-                -e 's|git.openwrt.org/openwrt/openwrt.git|github.com/openwrt/openwrt.git|g' \
-                -e 's|git.openwrt.org/feed/packages.git|github.com/openwrt/packages.git|g' \
-                -e 's|git.openwrt.org/project/luci.git|github.com/openwrt/luci.git|g' \
-                -e 's|git.openwrt.org/feed/routing.git|github.com/openwrt/routing.git|g' \
-                -e 's|git.openwrt.org/feed/telephony.git|github.com/openwrt/telephony.git|g' \
-                feeds.conf
-              retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
-            }
-          fi
+          log_info "Full feeds update"
+          retry 3 30 ./scripts/feeds update -a || {
+            log_warn "Feed update failed, trying GitHub mirrors"
+            sed -i \
+              -e 's|git.openwrt.org/openwrt/openwrt.git|github.com/openwrt/openwrt.git|g' \
+              -e 's|git.openwrt.org/feed/packages.git|github.com/openwrt/packages.git|g' \
+              -e 's|git.openwrt.org/project/luci.git|github.com/openwrt/luci.git|g' \
+              -e 's|git.openwrt.org/feed/routing.git|github.com/openwrt/routing.git|g' \
+              -e 's|git.openwrt.org/feed/telephony.git|github.com/openwrt/telephony.git|g' \
+              feeds.conf
+            retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
+          }
           group_end
 
           # 打补丁 / Apply patches
@@ -303,7 +224,7 @@ jobs:
               log_info "Patched golang-compiler.mk: CheckHost error → warning"
             fi
             # Ensure Package/$(PKG_NAME)/Default has TITLE so BuildPackage passes.
-            # Some cached golang-version.mk versions omit TITLE on linux/amd64,
+            # Some golang-version.mk versions omit TITLE on linux/amd64,
             # causing "Package/golang1.26-misc is missing the TITLE field" errors.
             GL_VERSION="feeds/packages/lang/golang/golang-version.mk"
             if [ -f "$GL_VERSION" ] && ! grep -qF 'TITLE:=Go programming language' "$GL_VERSION"; then
@@ -320,7 +241,7 @@ jobs:
                   HOST_LIB="staging_dir/host/lib/go-1.26"
                   GO126_BUILD="build_dir/hostpkg/go-1.26.0"
                   if [ -n "$SYS_GOROOT" ] && [ -d "$SYS_GOROOT" ]; then
-                    # Copy Go files only if not already present (cache miss case)
+                    # Copy Go files only if not already present
                     if [ ! -f "$HOST_LIB/bin/go" ]; then
                       log_info "Pre-installing golang1.26 from system $SYS_GO_VER"
                       mkdir -p "$HOST_LIB"
@@ -341,7 +262,7 @@ jobs:
                       [ -L "staging_dir/host/bin/gofmt1.26" ] || ln -sf "../lib/go-1.26/bin/gofmt" "staging_dir/host/bin/gofmt1.26"
                       log_info "golang1.26 pre-installed → $HOST_LIB"
                     else
-                      log_info "golang1.26 already at $HOST_LIB (cached)"
+                      log_info "golang1.26 already at $HOST_LIB"
                     fi
                     # Always (re)create stamp files so OpenWrt skips compilation
                     mkdir -p "$GO126_BUILD"
@@ -481,14 +402,14 @@ jobs:
           }
 
           TOTAL_OK=0 TOTAL_FAIL=0 FAILED_LIST="" PKG_TIMINGS=""
-          declare -A FEEDS_CACHE=()
+          declare -A FEEDS_INDEX=()
           while IFS= read -r -d '' fpath; do
             fname=$(basename "$fpath")
-            if [ -n "${FEEDS_CACHE[$fname]+x}" ]; then
-              log_warn "Duplicate feed package name detected: $fname (${FEEDS_CACHE[$fname]} vs $fpath)"
+            if [ -n "${FEEDS_INDEX[$fname]+x}" ]; then
+              log_warn "Duplicate feed package name detected: $fname (${FEEDS_INDEX[$fname]} vs $fpath)"
               continue
             fi
-            FEEDS_CACHE["$fname"]="$fpath"
+            FEEDS_INDEX["$fname"]="$fpath"
           done < <(find package/feeds -mindepth 2 -maxdepth 2 \( -type l -o -type d \) -print0 2>/dev/null)
 
           add_timing() {
@@ -519,7 +440,7 @@ jobs:
               local pkg_path="" status="ok" pkg_t0 pkg_dur
               [ -d "package/passwall-packages/$pkg" ] && pkg_path="package/passwall-packages/$pkg"
               [ -z "$pkg_path" ] && [ -d "package/$pkg" ] && pkg_path="package/$pkg"
-              [ -z "$pkg_path" ] && [ -n "${FEEDS_CACHE[$pkg]+x}" ] && pkg_path="${FEEDS_CACHE[$pkg]}"
+              [ -z "$pkg_path" ] && [ -n "${FEEDS_INDEX[$pkg]+x}" ] && pkg_path="${FEEDS_INDEX[$pkg]}"
               if [ -z "$pkg_path" ]; then
                 log_warn "[$label ${idx}/${total_pkgs}] Package not found: $pkg"
                 fail=$((fail + 1))
@@ -701,41 +622,6 @@ jobs:
           echo "run_name=${RUN_NAME}" >> "$GITHUB_OUTPUT"
 
           step_end
-
-      # ── 保存缓存 / Save caches ──
-      - name: Save SDK cache
-        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-sdk.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: openwrt-sdk
-          key: ${{ env.CACHE_VERSION }}-sdk-${{ steps.cfg.outputs.sdk-hash }}
-
-      - name: Save Rust/Cargo cache
-        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-rust.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ env.CACHE_VERSION }}-rust-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
-
-      - name: Save feeds cache
-        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-feeds.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            openwrt-sdk/feeds
-            openwrt-sdk/package/feeds
-          key: ${{ env.CACHE_VERSION }}-feeds-${{ steps.cfg.outputs.sdk-hash }}-${{ steps.cfg.outputs.week }}
-
-      - name: Save Go modules cache
-        if: (github.event_name != 'workflow_dispatch' || inputs.use_cache) && steps.cache-gomod.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ env.CACHE_VERSION }}-gomod-${{ steps.cfg.outputs.week }}
 
       # ── 发布 / Publish ──
       - name: Upload artifact
