@@ -51,15 +51,6 @@ jobs:
           step_start "Setup environment"
           export DEBIAN_FRONTEND=noninteractive
 
-          group_start "Free disk space"
-          log_info "Before cleanup: $(df -h / --output=avail | tail -1 | tr -d ' ')"
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell \
-            /usr/share/swift /usr/local/.ghcup 2>/dev/null || true
-          sudo docker image prune -af 2>/dev/null || true
-          sudo apt-get clean 2>/dev/null || true
-          log_info "After cleanup: $(df -h / --output=avail | tail -1 | tr -d ' ')"
-          group_end
 
           group_start "Install build dependencies"
           sudo apt-get update -qq
