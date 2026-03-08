@@ -29,6 +29,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # ── 构建缓存 / Build caches ──
+      - name: Restore build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.ccache
+            .cache/dl
+          key: build-${{ hashFiles('config/openwrt-sdk.conf') }}-${{ github.run_number }}
+          restore-keys: |
+            build-${{ hashFiles('config/openwrt-sdk.conf') }}-
+            build-
+
       # ── 加载配置 / Load config ──
       - name: Load config
         id: cfg
@@ -53,6 +70,7 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential libncurses5-dev gawk gettext unzip file \
             libssl-dev wget python3 python3-yaml git ca-certificates makeself zstd \
+            ccache \
             || die "apt-get install failed"
           log_info "Build dependencies installed"
           group_end
@@ -124,6 +142,13 @@ jobs:
             *)         die "Unsupported archive: $SDK_FILE" ;;
           esac
           rm -f "$SDK_FILE"
+          # Link dl/ to persistent cache
+          DL_CACHE="${GITHUB_WORKSPACE}/.cache/dl"
+          mkdir -p "$DL_CACHE"
+          rm -rf dl
+          ln -sf "$DL_CACHE" dl
+          log_info "Download cache: $(find "$DL_CACHE" -type f 2>/dev/null | wc -l) cached files"
+
           cd ..
           group_end
 
@@ -365,6 +390,13 @@ jobs:
           # Rust ≥1.90 bootstrap panics when CI env vars are set
           unset CI GITHUB_ACTIONS
 
+          # ccache for C/C++ host compilation
+          export CCACHE_DIR="$HOME/.ccache"
+          export PATH="/usr/lib/ccache:$PATH"
+          mkdir -p "$CCACHE_DIR"
+          ccache -M 2G
+          ccache -z
+
           # Rust 编译优化 / Rust compilation optimizations
           RUST_CODEGEN_UNITS="${RUST_CODEGEN_UNITS:-8}"
           RUST_LTO_MODE="${RUST_LTO_MODE:-off}"
@@ -470,6 +502,7 @@ jobs:
           [ "$TOTAL_OK" -lt "$MIN_REQUIRED" ] && die "No PassWall package source was built"
 
           log_info "Compilation complete: $TOTAL_OK package sources"
+          ccache -s 2>/dev/null || true
           step_end
 
       # ── 收集产物 / Collect packages ──
