@@ -543,14 +543,16 @@ jobs:
             target_path=$(printf '%s' "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p')
             [ -n "$dist_root" ] || die "Cannot derive OpenWrt dist root from SDK URL"
             [ -n "$target_path" ] || die "Cannot derive target path from SDK URL"
+            # apk v3 repositories-file entries must point to packages.adb files,
+            # not directories. See include/feeds.mk in the OpenWrt build system.
             cat > "$repo_file" <<EOF
-          $LOCAL_REPO_ARCH_DIR
-          $dist_root/targets/$target_path/packages
-          $dist_root/packages/$ARCH_PACKAGES/base
-          $dist_root/packages/$ARCH_PACKAGES/packages
-          $dist_root/packages/$ARCH_PACKAGES/luci
-          $dist_root/packages/$ARCH_PACKAGES/routing
-          $dist_root/packages/$ARCH_PACKAGES/telephony
+          $LOCAL_REPO_INDEX
+          $dist_root/targets/$target_path/packages/packages.adb
+          $dist_root/packages/$ARCH_PACKAGES/base/packages.adb
+          $dist_root/packages/$ARCH_PACKAGES/packages/packages.adb
+          $dist_root/packages/$ARCH_PACKAGES/luci/packages.adb
+          $dist_root/packages/$ARCH_PACKAGES/routing/packages.adb
+          $dist_root/packages/$ARCH_PACKAGES/telephony/packages.adb
           EOF
             log_info "Combined repositories file:"
             cat "$repo_file"
