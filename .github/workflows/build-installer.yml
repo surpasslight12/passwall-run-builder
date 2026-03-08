@@ -542,17 +542,28 @@ jobs:
             [ "${#LOCAL_REPO_APKS[@]}" -gt 0 ] || die "Local APK repository is empty"
 
             # Create packages.adb (v3 format) from local APKs.
-            # mkndx may exit non-zero for dep warnings on a subset repo — that is
-            # expected. Redirect output to a log file (NOT a pipe) to avoid SIGPIPE
-            # killing the process before it finishes writing the index.
+            # Run mkndx from inside the repository directory, matching OpenWrt's
+            # own package index generation flow for APK feeds.
+            # Redirect output to a log file (NOT a pipe) to avoid SIGPIPE killing
+            # the process before it finishes writing the index.
             # --allow-untrusted: self-built APKs are not signed.
             local mkndx_log="/tmp/mkndx-$$.log"
-            if "$APK_TOOL" mkndx --allow-untrusted --output "$LOCAL_REPO_INDEX" "${LOCAL_REPO_APKS[@]}" \
-                 >"$mkndx_log" 2>&1; then
+            if (
+              cd "$LOCAL_REPO_ARCH_DIR"
+              "$APK_TOOL" mkndx --allow-untrusted --output packages.adb ./*.apk
+            ) >"$mkndx_log" 2>&1; then
               log_info "apk mkndx succeeded"
             else
-              log_warn "apk mkndx exited non-zero (may be harmless dep warnings):"
-              head -20 "$mkndx_log" || true
+              log_warn "apk mkndx exited non-zero on repo-local invocation, retrying with explicit --root"
+              if (
+                cd "$LOCAL_REPO_ARCH_DIR"
+                "$APK_TOOL" mkndx --root "$PWD" --allow-untrusted --output packages.adb ./*.apk
+              ) >>"$mkndx_log" 2>&1; then
+                log_info "apk mkndx succeeded on retry with --root"
+              else
+                log_warn "apk mkndx still failed; log tail follows:"
+                tail -40 "$mkndx_log" || true
+              fi
             fi
             rm -f "$mkndx_log"
 
