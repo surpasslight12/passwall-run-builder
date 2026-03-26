@@ -25,7 +25,17 @@ jobs:
             const upstreamOwner = 'Openwrt-Passwall'
             const upstreamRepo = 'openwrt-passwall'
             const { owner, repo } = context.repo
-            const headSha = context.sha
+            const { data: repoInfo } = await github.rest.repos.get({ owner, repo })
+            const defaultBranch = repoInfo.default_branch
+            const { data: branchInfo } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: defaultBranch
+            })
+            const headSha = branchInfo.commit.sha
+            core.setOutput('default_branch', defaultBranch)
+            core.setOutput('head_sha', headSha)
+            core.info(`Using ${defaultBranch}@${headSha} for tag creation.`)
 
             const { data: release } = await github.rest.repos.getLatestRelease({
               owner: upstreamOwner,
@@ -75,6 +85,8 @@ jobs:
           echo "- Upstream tag: \`${{ steps.upstream.outputs.upstream_tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Synced local tag: \`${{ steps.upstream.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Created new tag: \`${{ steps.upstream.outputs.created }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Default branch: \`${{ steps.upstream.outputs.default_branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tagged commit: \`${{ steps.upstream.outputs.head_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Trigger build workflow
         if: steps.upstream.outputs.created == 'true'

@@ -97,14 +97,79 @@ check_disk_space() {
   log_info "Disk: ${avail_gb}GB available"
 }
 
+path_available_gb() {
+  local path="$1"
+  [ -e "$path" ] || mkdir -p "$path"
+  df -Pk "$path" | awk 'NR==2 {print int($4 / 1024 / 1024)}'
+}
+
+choose_temp_root() {
+  local min_gb="${1:-4}"
+  shift || true
+  local candidate avail_gb
+
+  for candidate in "$@"; do
+    [ -n "${candidate:-}" ] || continue
+    mkdir -p "$candidate" 2>/dev/null || continue
+    avail_gb=$(path_available_gb "$candidate" 2>/dev/null || echo 0)
+    if [ "${avail_gb:-0}" -ge "$min_gb" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+make_managed_tempdir() {
+  local prefix="$1"
+  shift
+  local root
+  root=$(choose_temp_root 4 "$@") || die "Cannot find temp root with enough free space"
+  mktemp -d "$root/${prefix}.XXXXXX"
+}
+
 # ── GitHub Actions 辅助 / GitHub Actions helpers ──
 gh_set_env() {
   export "$1=$2"
-  [ -n "${GITHUB_ENV:-}" ] && echo "$1=$2" >> "$GITHUB_ENV"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    echo "$1=$2" >> "$GITHUB_ENV"
+  fi
+  return 0
 }
 
 gh_summary() {
-  [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  return 0
+}
+
+# ── 配置加载 / Load KEY=VALUE config into environment ──
+load_env_config() {
+  local config_file="$1"
+  [ -f "$config_file" ] || die "Config file not found: $config_file"
+
+  while IFS='=' read -r key value; do
+    key=${key#${key%%[![:space:]]*}}
+    key=${key%%[[:space:]]*}
+    [ -n "${key:-}" ] || continue
+    [[ "$key" =~ ^# ]] && continue
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "Invalid config key: $key"
+    value=${value#${value%%[![:space:]]*}}
+    value=${value%${value##*[![:space:]]}}
+    export "$key=$value"
+    [ -n "${GITHUB_ENV:-}" ] && printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+  done < <(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$config_file")
+
+  return 0
+}
+
+# ── GitHub release tag 解析 / Resolve latest GitHub release tag ──
+resolve_latest_github_release_tag() {
+  local owner="$1" repo="$2"
+  curl -fsSL --retry 3 --retry-delay 10 "https://api.github.com/repos/${owner}/${repo}/releases/latest" \
+    | python3 -c 'import json,sys; print((json.load(sys.stdin).get("tag_name") or "").strip())'
 }
 
 # ── PassWall 源目录映射 / PassWall source directory mapping ──
@@ -131,6 +196,108 @@ find_pkg_file() {
   local dir="$1" pkg="$2"
   find "$dir" -type f \( -name "${pkg}-[0-9]*.apk" -o -name "${pkg}_[0-9]*.apk" \) \
     | LC_ALL=C sort | head -n 1
+}
+
+payload_pkg_candidates() {
+  local pkg="$1"
+  case "$pkg" in
+    nftables)
+      printf '%s\n' nftables nftables-nojson nftables-json
+      ;;
+    *)
+      printf '%s\n' "$pkg"
+      ;;
+  esac
+}
+
+find_payload_pkg_file() {
+  local dir="$1" pkg="$2" candidate pkg_file
+  while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    pkg_file=$(find_pkg_file "$dir" "$candidate" || true)
+    if [ -n "$pkg_file" ]; then
+      printf '%s\n' "$pkg_file"
+      return 0
+    fi
+  done < <(payload_pkg_candidates "$pkg")
+  return 1
+}
+
+# ── Git tag 解析 / Resolve a remote Git tag from candidate names ──
+resolve_remote_tag() {
+  local repo_url="$1"
+  shift
+  local candidate
+  for candidate in "$@"; do
+    [ -n "$candidate" ] || continue
+    if git ls-remote --exit-code --refs --tags "$repo_url" "refs/tags/$candidate" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ── Git 默认分支解析 / Resolve a remote repository default branch ──
+resolve_remote_default_branch() {
+  local repo_url="$1"
+  git ls-remote --symref "$repo_url" HEAD 2>/dev/null \
+    | awk '/^ref:/ {sub("refs/heads/","",$2); print $2; exit}'
+}
+
+# ── SHA256 清单 / Generate SHA256 manifest for a directory tree ──
+generate_sha256_manifest() {
+  local dir="$1" manifest="${2:-SHA256SUMS}"
+  (
+    cd "$dir"
+    find . -type f ! -name "$manifest" -print0 \
+      | LC_ALL=C sort -z \
+      | xargs -0 sha256sum > "$manifest"
+  )
+}
+
+# ── 可恢复校验下载 / Verified download with resume support ──
+download_verified_file() {
+  local dest_dir="$1" filename="$2" expected_sha256="$3"
+  shift 3
+  local dest_path partial_path url actual_sha256
+
+  [ -n "$dest_dir" ] || die "download_verified_file requires dest_dir"
+  [ -n "$filename" ] || die "download_verified_file requires filename"
+  [ -n "$expected_sha256" ] || die "download_verified_file requires expected_sha256"
+  [ "$#" -gt 0 ] || die "download_verified_file requires at least one URL"
+
+  mkdir -p "$dest_dir"
+  dest_path="$dest_dir/$filename"
+  partial_path="${dest_path}.dl"
+
+  if [ -f "$dest_path" ]; then
+    actual_sha256=$(sha256sum "$dest_path" | awk '{print $1}')
+    if [ "$actual_sha256" = "$expected_sha256" ]; then
+      log_info "Using cached verified file: $filename"
+      return 0
+    fi
+    log_warn "Cached file hash mismatch for $filename; re-downloading"
+    rm -f "$dest_path"
+  fi
+
+  for url in "$@"; do
+    [ -n "$url" ] || continue
+    log_info "Downloading $filename from $url"
+    if retry 3 10 curl -fL --connect-timeout 10 --retry 3 --retry-delay 5 --retry-all-errors \
+      --continue-at - --output "$partial_path" "$url"; then
+      actual_sha256=$(sha256sum "$partial_path" | awk '{print $1}')
+      if [ "$actual_sha256" = "$expected_sha256" ]; then
+        mv "$partial_path" "$dest_path"
+        log_info "Verified download: $filename"
+        return 0
+      fi
+      log_warn "Hash mismatch for $filename from $url"
+      rm -f "$partial_path"
+    fi
+  done
+
+  die "Failed to download verified file: $filename"
 }
 
 # ── APK 版本规格 / Derive pinned "pkg=version" spec from APK filename ──

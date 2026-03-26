@@ -11,6 +11,12 @@ concurrency:
 
 env:
   MIN_REQUIRED_PACKAGES: '15'
+  # Official checksum source: https://go.dev/dl/?mode=json&include=all
+  GO_VERSION: '1.26.1'
+  GO_SHA256_LINUX_AMD64: '031f088e5d955bab8657ede27ad4e3bc5b7c1ba281f05f245bcc304f327c987a'
+  # Official checksum source: https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256
+  RUST_TOOLCHAIN_VERSION: '1.94.0'
+  RUSTUP_INIT_SHA256_LINUX_AMD64: '4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10'
 
 jobs:
   build:
@@ -29,682 +35,72 @@ jobs:
         with:
           persist-credentials: false
 
-      # ── 加载配置 / Load config ──
-      - name: Load config
-        id: cfg
-        run: |
-          source scripts/utils.sh
-          while IFS= read -r line || [ -n "$line" ]; do
-            [[ "$line" =~ ^[[:space:]]*# ]] && continue
-            [[ -z "${line// }" ]] && continue
-            [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && { echo "$line" >> "$GITHUB_ENV"; export "$line"; }
-          done < config/openwrt-sdk.conf
-          [ -n "${OPENWRT_SDK_URL:-}" ] || { echo "::error::OPENWRT_SDK_URL not set"; exit 1; }
-
-      # ── 环境准备 / Setup environment ──
       - name: Setup environment
         run: |
           source scripts/utils.sh
           step_start "Setup environment"
           export DEBIAN_FRONTEND=noninteractive
-
-          group_start "Install build dependencies"
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential libncurses5-dev gawk gettext unzip file \
             libssl-dev wget python3 python3-yaml git ca-certificates makeself zstd \
             || die "apt-get install failed"
-          log_info "Build dependencies installed"
-          group_end
-
           step_end
 
-      # ── 安装工具链 / Install toolchains ──
       - name: Install toolchains
         run: |
           source scripts/utils.sh
           step_start "Install toolchains"
 
-          # ── Go ──
-          group_start "Install Go"
-          GO_VER=$(curl -fsSL --retry 3 --retry-delay 10 https://go.dev/VERSION?m=text | head -1 | sed 's/go//')
-          [ -n "$GO_VER" ] || die "Cannot fetch Go version"
+          GO_VER="${GO_VERSION}"
+          GO_TARBALL="go${GO_VER}.linux-amd64.tar.gz"
           CURRENT_GO=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' || true)
-          if [ "$CURRENT_GO" = "$GO_VER" ]; then
-            log_info "Go $GO_VER already installed"
-          else
-            log_info "Installing Go $GO_VER"
-            TARBALL="go${GO_VER}.linux-amd64.tar.gz"
-            retry 3 20 wget -q "https://go.dev/dl/${TARBALL}" -O "/tmp/${TARBALL}"
+          if [ "$CURRENT_GO" != "$GO_VER" ]; then
+            retry 3 20 wget -q "https://go.dev/dl/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"
+            printf '%s  %s\n' "$GO_SHA256_LINUX_AMD64" "/tmp/${GO_TARBALL}" | sha256sum -c - \
+              || die "Go tarball checksum verification failed"
             sudo rm -rf /usr/local/go
-            sudo tar -C /usr/local -xzf "/tmp/${TARBALL}"
-            rm -f "/tmp/${TARBALL}"
-            export PATH="/usr/local/go/bin:$PATH"
-            echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+            sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+            rm -f "/tmp/${GO_TARBALL}"
           fi
-          go version || die "Go verification failed"
-          group_end
+          export PATH="/usr/local/go/bin:$PATH"
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          GO_ACTUAL=$(go version | awk '{print $3}' | sed 's/go//')
+          [ "$GO_ACTUAL" = "$GO_VER" ] || die "Go verification failed: expected $GO_VER, got $GO_ACTUAL"
 
-          # ── Rust ──
-          group_start "Install Rust"
-          if command -v rustc >/dev/null 2>&1; then
-            log_info "Rust $(rustc --version | awk '{print $2}') already installed"
-            [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
-          else
-            log_info "Installing Rust"
-            retry 3 20 bash -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable"
+          RUST_VER="${RUST_TOOLCHAIN_VERSION}"
+          if [ -f "$HOME/.cargo/env" ]; then
             source "$HOME/.cargo/env"
           fi
+          if ! command -v rustup >/dev/null 2>&1; then
+            RUSTUP_INIT="/tmp/rustup-init"
+            retry 3 20 wget -q https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init -O "$RUSTUP_INIT"
+            printf '%s  %s\n' "$RUSTUP_INIT_SHA256_LINUX_AMD64" "$RUSTUP_INIT" | sha256sum -c - \
+              || die "rustup-init checksum verification failed"
+            chmod +x "$RUSTUP_INIT"
+            "$RUSTUP_INIT" -y --profile minimal --default-toolchain "$RUST_VER" --no-modify-path
+            rm -f "$RUSTUP_INIT"
+            source "$HOME/.cargo/env"
+          fi
+          retry 3 20 rustup toolchain install "$RUST_VER" --profile minimal --no-self-update
+          rustup default "$RUST_VER"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          rustc --version || die "Rust verification failed"
+          RUST_ACTUAL=$(rustc --version | awk '{print $2}')
+          [ "$RUST_ACTUAL" = "$RUST_VER" ] || die "Rust verification failed: expected $RUST_VER, got $RUST_ACTUAL"
           cargo --version || die "Cargo verification failed"
-          group_end
 
           step_end
 
-      # ── SDK 准备 / Setup SDK ──
-      - name: Setup SDK
-        run: |
-          source scripts/utils.sh
-          step_start "Setup SDK"
-
-          group_start "Download SDK"
-          rm -rf openwrt-sdk
-          mkdir -p openwrt-sdk
-          cd openwrt-sdk
-          SDK_FILE=$(basename "$OPENWRT_SDK_URL")
-          log_info "Downloading $SDK_FILE"
-          retry 3 30 wget -q "$OPENWRT_SDK_URL" -O "$SDK_FILE"
-          [ -f "$SDK_FILE" ] || die "Download failed"
-          log_info "Extracting\u2026"
-          case "$SDK_FILE" in
-            *.tar.zst) tar --use-compress-program=zstd -xf "$SDK_FILE" --strip-components=1 ;;
-            *.tar.xz)  tar xf "$SDK_FILE" --strip-components=1 ;;
-            *.tar.gz)  tar xzf "$SDK_FILE" --strip-components=1 ;;
-            *)         die "Unsupported archive: $SDK_FILE" ;;
-          esac
-          rm -f "$SDK_FILE"
-          mkdir -p dl tmp/go-build
-
-          cd ..
-          group_end
-
-          # 替换 SDK 内置 Go / Replace SDK bundled Go
-          group_start "Update SDK Go"
-          SYS_GO=$(command -v go 2>/dev/null || echo "/usr/local/go/bin/go")
-          if [ -x "$SYS_GO" ]; then
-            SYS_VER=$("$SYS_GO" version | awk '{print $3}')
-            GOROOT=$("$SYS_GO" env GOROOT)
-            log_info "System Go: $SYS_VER ($GOROOT)"
-            while IFS= read -r -d '' godir; do
-              SDK_VER=$("$godir/bin/go" version 2>/dev/null | awk '{print $3}' || echo "unknown")
-              if [ "$SDK_VER" != "$SYS_VER" ]; then
-                log_info "Replacing $godir ($SDK_VER \u2192 $SYS_VER)"
-                rm -rf "$godir" && cp -a "$GOROOT" "$godir"
-              fi
-            done < <(find openwrt-sdk/staging_dir -maxdepth 4 -type d \( -name "go-*" -o -name "go" \) -print0 2>/dev/null)
-          else
-            log_warn "System Go not found, skipping SDK Go replacement"
-          fi
-          group_end
-
-          step_end
-
-      # ── 配置 feeds / Configure feeds ──
-      - name: Configure feeds
-        run: |
-          source scripts/utils.sh
-          step_start "Configure feeds"
-
-          cd openwrt-sdk
-
-          group_start "Configure feeds"
-          if [ -f feeds.conf.default ]; then
-            cp feeds.conf.default feeds.conf
-          else
-            cat > feeds.conf <<'EOF'
-          src-git packages https://github.com/openwrt/packages.git
-          src-git luci https://github.com/openwrt/luci.git
-          EOF
-          fi
-
-          log_info "Full feeds update"
-          retry 3 30 ./scripts/feeds update -a || {
-            log_warn "Feed update failed, trying GitHub mirrors"
-            sed -i \
-              -e 's|git.openwrt.org/openwrt/openwrt.git|github.com/openwrt/openwrt.git|g' \
-              -e 's|git.openwrt.org/feed/packages.git|github.com/openwrt/packages.git|g' \
-              -e 's|git.openwrt.org/project/luci.git|github.com/openwrt/luci.git|g' \
-              -e 's|git.openwrt.org/feed/routing.git|github.com/openwrt/routing.git|g' \
-              -e 's|git.openwrt.org/feed/telephony.git|github.com/openwrt/telephony.git|g' \
-              feeds.conf
-            retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
-          }
-          group_end
-
-          # 打补丁 / Apply patches
-          group_start "Apply patches"
-          if [ -d feeds/packages/lang/golang ]; then
-            find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) \
-              -exec grep -l 'GOTOOLCHAIN=local' {} \; \
-              -exec sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} \;
-            log_info "Patched GOTOOLCHAIN"
-          fi
-          CURL_MK="feeds/packages/net/curl/Makefile"
-          if [ -f "$CURL_MK" ] && grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MK"; then
-            sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MK"
-            log_info "Patched curl LDAP"
-          fi
-          RUST_MK="feeds/packages/lang/rust/Makefile"
-          if [ -f "$RUST_MK" ] && grep -qE 'download-ci-llvm=(true|if-unchanged)' "$RUST_MK"; then
-            sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$RUST_MK"
-            log_info "Patched Rust download-ci-llvm"
-          fi
-          # Fix golang1.26 host-package parse-time error on linux/amd64
-          # openwrt-packages sets GO_DEFAULT_VERSION:=1.26, so all Go packages now
-          # depend on golang1.26/host. Its Makefile fires $(error) at parse-time;
-          # change to $(warning) so parsing succeeds, then pre-install from system Go.
-          COMPILER_MK="feeds/packages/lang/golang/golang-compiler.mk"
-          if [ -d "feeds/packages/lang/golang/golang1.26" ] && [ -f "$COMPILER_MK" ]; then
-            if grep -q '$(error go-' "$COMPILER_MK"; then
-              sed -i 's/$(error go-/$(warning go-/g' "$COMPILER_MK"
-              log_info "Patched golang-compiler.mk: CheckHost error \u2192 warning"
-            fi
-            # Ensure Package/$(PKG_NAME)/Default has TITLE so BuildPackage passes.
-            # Some golang-version.mk versions omit TITLE on linux/amd64,
-            # causing "Package/golang1.26-misc is missing the TITLE field" errors.
-            GL_VERSION="feeds/packages/lang/golang/golang-version.mk"
-            if [ -f "$GL_VERSION" ] && ! grep -qF 'TITLE:=Go programming language' "$GL_VERSION"; then
-              awk '/^define Package\/\$\(PKG_NAME\)\/Default/ { print; print "  TITLE:=Go programming language"; next } { print }' \
-                "$GL_VERSION" > /tmp/gv-patched.mk && mv /tmp/gv-patched.mk "$GL_VERSION"
-              log_info "Patched golang-version.mk: added TITLE to Package/Default"
-            fi
-            SYS_GO_BIN=$(command -v go 2>/dev/null || true)
-            if [ -n "$SYS_GO_BIN" ]; then
-              SYS_GO_VER=$("$SYS_GO_BIN" version 2>/dev/null | awk '{print $3}')
-              case "$SYS_GO_VER" in
-                go1.26*)
-                  SYS_GOROOT=$("$SYS_GO_BIN" env GOROOT 2>/dev/null || true)
-                  HOST_LIB="staging_dir/host/lib/go-1.26"
-                  GO126_BUILD="build_dir/hostpkg/go-1.26.0"
-                  if [ -n "$SYS_GOROOT" ] && [ -d "$SYS_GOROOT" ]; then
-                    # Copy Go files only if not already present
-                    if [ ! -f "$HOST_LIB/bin/go" ]; then
-                      log_info "Pre-installing golang1.26 from system $SYS_GO_VER"
-                      mkdir -p "$HOST_LIB"
-                      cp -a "$SYS_GOROOT/." "$HOST_LIB/"
-                      # Remove host-arch prebuilt stdlib (per golang-version.mk Host/Install)
-                      rm -rf "$HOST_LIB/pkg/linux_amd64" 2>/dev/null || true
-                      # Install openwrt gcc-wrapper used by Go cross-compile
-                      GCC_HELPER="feeds/packages/lang/golang/go-gcc-helper"
-                      if [ -f "$GCC_HELPER" ]; then
-                        mkdir -p "$HOST_LIB/openwrt"
-                        install -m 755 "$GCC_HELPER" "$HOST_LIB/openwrt/"
-                        [ -L "$HOST_LIB/openwrt/gcc" ]  || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/gcc"
-                        [ -L "$HOST_LIB/openwrt/g++" ]  || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/g++"
-                      fi
-                      # Create BinLinks in staging_dir/host/bin/
-                      mkdir -p "staging_dir/host/bin"
-                      [ -L "staging_dir/host/bin/go1.26" ]    || ln -sf "../lib/go-1.26/bin/go"    "staging_dir/host/bin/go1.26"
-                      [ -L "staging_dir/host/bin/gofmt1.26" ] || ln -sf "../lib/go-1.26/bin/gofmt" "staging_dir/host/bin/gofmt1.26"
-                      log_info "golang1.26 pre-installed \u2192 $HOST_LIB"
-                    else
-                      log_info "golang1.26 already at $HOST_LIB"
-                    fi
-                    # Always (re)create stamp files so OpenWrt skips compilation
-                    mkdir -p "$GO126_BUILD"
-                    for s in .configured .built .installed .stamp_configured .stamp_built .stamp_installed; do
-                      touch "$GO126_BUILD/$s"
-                    done
-                    # Create the host-install stamp so OpenWrt skips host/compile entirely
-                    mkdir -p "staging_dir/host/stamp"
-                    touch "staging_dir/host/stamp/.golang1.26_installed"
-                  fi
-                  ;;
-              esac
-            fi
-          fi
-          group_end
-
-          # 克隆 PassWall 包 / Clone PassWall packages
-          group_start "Clone PassWall package sources"
-          rm -rf feeds/packages/net/{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,\
-          hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,\
-          shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,\
-          xray-plugin,geoview,shadow-tls}
-          rm -rf package/passwall-packages package/passwall-luci
-          retry 3 10 git clone --depth=1 \
-            https://github.com/Openwrt-Passwall/openwrt-passwall-packages package/passwall-packages
-          retry 3 10 git clone --depth=1 \
-            https://github.com/Openwrt-Passwall/openwrt-passwall package/passwall-luci
-          group_end
-
-          # 安装 feeds 包 / Install feeds
-          group_start "Install feeds"
-          ./scripts/feeds update -i
-          ./scripts/feeds install \
-            libev libmbedtls libsodium libopenssl libpcre2 libudns \
-            boost boost-program_options boost-system \
-            ca-bundle c-ares pcre2 zlib libubox libubus \
-            rpcd rpcd-mod-file rpcd-mod-ucode ucode ucode-mod-fs ucode-mod-uci \
-            ucode-mod-ubus ucode-mod-math libucode \
-            coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
-            libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
-            iwinfo openssl libnl-tiny golang rust \
-            || log_warn "Some feed packages unavailable"
-          ./scripts/feeds install luci-base || log_warn "luci-base install had issues"
-          group_end
-
-          # 生成 .config / Generate build config
-          group_start "Generate .config"
-          rm -f .config .config.old 2>/dev/null || true
-          PASSWALL_LUCI_DIR="package/passwall-luci/luci-app-passwall"
-          PASSWALL_MK="$PASSWALL_LUCI_DIR/Makefile"
-          PASSWALL_ROOTS="$PWD/.passwall-package-roots"
-          [ -f "$PASSWALL_MK" ] || die "PassWall Makefile not found: $PASSWALL_MK"
-
-          cat >> .config <<'EOF'
-          CONFIG_PACKAGE_luci-app-passwall=m
-          CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m
-          EOF
-
-          make defconfig </dev/null
-
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          root = Path.cwd()
-          makefile = root / "package/passwall-luci/luci-app-passwall/Makefile"
-          config = (root / ".config").read_text()
-          enabled = set(re.findall(r'^(CONFIG_PACKAGE_luci-app-passwall_[A-Za-z0-9_]+)=[ym]$', config, re.M))
-
-          roots = []
-          current = None
-          for raw_line in makefile.read_text().splitlines():
-            line = raw_line.strip()
-            match = re.match(r'^config PACKAGE_\$\(PKG_NAME\)_([A-Za-z0-9_]+)$', line)
-            if match:
-              current = f"CONFIG_PACKAGE_luci-app-passwall_{match.group(1)}"
-              continue
-            match = re.match(r'^select PACKAGE_([A-Za-z0-9_\-]+)$', line)
-            if match and current in enabled:
-              roots.append(match.group(1))
-
-          out = root / ".passwall-package-roots"
-          out.write_text("\n".join(sorted(dict.fromkeys(roots))) + "\n")
-          print(f"generated {len(set(roots))} passwall root packages from default-selected features")
-          PY
-
-          [ -s "$PASSWALL_ROOTS" ] || die "Auto-generated PassWall package root list is empty"
-          log_info "Generated $(wc -l < "$PASSWALL_ROOTS") PassWall root packages"
-          log_info "Config generated"
-          group_end
-
-          # 验证环境 / Validate
-          group_start "Validate build environment"
-          for tool in go rustc cargo make gcc; do
-            command -v "$tool" >/dev/null 2>&1 || die "Missing: $tool"
-          done
-          check_disk_space 10
-          for path in scripts/feeds staging_dir Makefile package/passwall-packages package/passwall-luci/luci-app-passwall; do
-            [ -e "$path" ] || die "Missing: $path"
-          done
-          log_info "Validation passed"
-          group_end
-
-          step_end
-
-      # ── 编译包 / Compile packages ──
-      - name: Compile packages
-        run: |
-          source scripts/utils.sh
-          step_start "Compile packages"
-
-          cd openwrt-sdk
-          export FORCE_UNSAFE_CONFIGURE=1
-          export GOPROXY="https://proxy.golang.org,https://goproxy.io,direct"
-          # Rust ≥1.90 bootstrap panics when CI env vars are set
-          unset CI GITHUB_ACTIONS
-
-          # Cargo 环境 (codegen-units / opt-level / lto / RUSTFLAGS 均由 OpenWrt cargo.mk 控制)
-          export CARGO_INCREMENTAL=0
-          export CARGO_NET_GIT_FETCH_WITH_CLI=true
-
-          PASSWALL_ROOTS_FILE="$PWD/.passwall-package-roots"
-          [ -s "$PASSWALL_ROOTS_FILE" ] || die "PassWall root package list missing"
-
-          declare -A LOCAL_SOURCE_PKGS=()
-          while IFS= read -r pkg; do
-            [ -n "$pkg" ] || continue
-            src_dir=$(map_passwall_source_dir "$pkg" || true)
-            [ -n "$src_dir" ] || continue
-            LOCAL_SOURCE_PKGS["$src_dir"]+=" $pkg"
-          done < "$PASSWALL_ROOTS_FILE"
-          LOCAL_SOURCE_PKGS["package/passwall-luci/luci-app-passwall"]+=" luci-app-passwall luci-i18n-passwall-zh-cn"
-
-          if grep -Eq '^(shadow-tls|shadowsocks-rust-)' "$PASSWALL_ROOTS_FILE"; then
-            group_start "Install Rust target"
-            GCC_BIN=$(find staging_dir -type f -path '*/toolchain-*/bin/*-gcc' 2>/dev/null | LC_ALL=C sort | head -n 1 || true)
-            [ -n "$GCC_BIN" ] || die "Cannot locate OpenWrt toolchain gcc"
-            GCC_TRIPLE=$($GCC_BIN -dumpmachine 2>/dev/null || true)
-            [ -n "$GCC_TRIPLE" ] || die "Cannot determine OpenWrt toolchain target triple"
-            RUST_TARGET=$(printf '%s' "$GCC_TRIPLE" | sed 's/openwrt/unknown/')
-            [ -n "$RUST_TARGET" ] || die "Cannot derive Rust target from $GCC_TRIPLE"
-            if rustup target list --installed | grep -qx "$RUST_TARGET"; then
-              log_info "Rust target already installed: $RUST_TARGET"
-            else
-              log_info "Installing Rust target: $RUST_TARGET"
-              rustup target add "$RUST_TARGET" || die "Failed to install Rust target: $RUST_TARGET"
-            fi
-            group_end
-          fi
-
-          TOTAL_OK=0
-          TOTAL_FAIL=0
-          FAILED_LIST=""
-          PKG_TIMINGS=""
-
-          add_timing() {
-            local name="$1" status="$2" duration="$3"
-            local display_time="$duration"
-            [[ "$duration" =~ ^[0-9]+$ ]] && display_time="${duration}s"
-            log_info "$name finished in ${display_time} ($status)"
-            PKG_TIMINGS+="${name}|${status}|${display_time}"$'\n'
-          }
-
-          check_disk_space 10
-
-          group_start "Build PassWall package sources"
-          while IFS= read -r src_dir; do
-            [ -n "$src_dir" ] || continue
-            label=$(basename "$src_dir")
-            pkg_t0=$(date +%s)
-            if make_pkg "$src_dir/compile" "$label"; then
-              TOTAL_OK=$((TOTAL_OK + 1))
-              add_timing "$label" "ok" "$(( $(date +%s) - pkg_t0 ))"
-            else
-              TOTAL_FAIL=$((TOTAL_FAIL + 1))
-              FAILED_LIST="$FAILED_LIST $label"
-              add_timing "$label" "failed" "$(( $(date +%s) - pkg_t0 ))"
-            fi
-          done < <(printf '%s\n' "${!LOCAL_SOURCE_PKGS[@]}" | LC_ALL=C sort)
-          group_end
-
-          log_info "Package sources: $TOTAL_OK OK, $TOTAL_FAIL failed"
-          [ -n "$FAILED_LIST" ] && log_warn "Failed:$FAILED_LIST"
-
-          {
-            SUMMARY="## Build Summary"$'\n'
-            SUMMARY+="- **Built package sources**: $TOTAL_OK"$'\n'
-            SUMMARY+="- **Failed package sources**: $TOTAL_FAIL"$'\n'
-            if [ -n "$FAILED_LIST" ]; then
-              SUMMARY+="### Failed"$'\n'
-              for p in $FAILED_LIST; do SUMMARY+="- \`$p\`"$'\n'; done
-            fi
-            if [ -n "$PKG_TIMINGS" ]; then
-              SUMMARY+="### Build Durations"$'\n'
-              SUMMARY+="| Package Source | Status | Time |"$'\n'
-              SUMMARY+="| --- | --- | --- |"$'\n'
-              while IFS='|' read -r pkg status sec; do
-                [ -z "$pkg" ] && continue
-                SUMMARY+="| $pkg | $status | $sec |"$'\n'
-              done <<< "$PKG_TIMINGS"
-            fi
-            gh_summary "$SUMMARY"
-          }
-
-          MIN_REQUIRED=1
-          MAX_FAILURES=0
-          [ "$TOTAL_FAIL" -gt "$MAX_FAILURES" ] && die "Too many failures: $TOTAL_FAIL > $MAX_FAILURES"
-          [ "$TOTAL_OK" -lt "$MIN_REQUIRED" ] && die "No PassWall package source was built"
-
-          log_info "Compilation complete: $TOTAL_OK package sources"
-          step_end
-
-      # ── 收集产物 / Collect packages ──
-      - name: Collect packages
-        run: |
-          source scripts/utils.sh
-          step_start "Collect packages"
-
-          cd openwrt-sdk
-
-          PAYLOAD="${GITHUB_WORKSPACE}/payload"
-          DEPENDS="$PAYLOAD/depends"
-          find "$PAYLOAD" -maxdepth 1 -type f \( -name '*.apk' -o -name '*.run' \) -delete 2>/dev/null || true
-          find "$DEPENDS" -maxdepth 1 -type f -name '*.apk' -delete 2>/dev/null || true
-          mkdir -p "$DEPENDS"
-          PASSWALL_ROOTS_FILE="$PWD/.passwall-package-roots"
-          [ -s "$PASSWALL_ROOTS_FILE" ] || die "PassWall root package list missing"
-
-          declare -A MISSING_PKGS=()
-          declare -A OFFICIAL_FETCH_PKGS=()
-          declare -A TOPLEVEL_PKGS=()
-          declare -A TOPLEVEL_FILES=()
-
-          APK_TOOL="staging_dir/host/bin/apk"
-          ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\([^"]*\)"/\1/p' .config | head -n 1)
-          LOCAL_REPO_ROOT="$PWD/bin/packages"
-          LOCAL_REPO_INDEX_LIST="$PWD/.local-repositories"
-          FETCH_DIR="$PWD/.resolved-apks"
-
-          [ -x "$APK_TOOL" ] || die "OpenWrt host apk tool not found: $APK_TOOL"
-          [ -n "$ARCH_PACKAGES" ] || die "Cannot derive ARCH_PACKAGES from .config"
-          log_info "APK tool: $("$APK_TOOL" --version 2>&1 || echo 'unknown version')"
-          log_info "ARCH_PACKAGES: $ARCH_PACKAGES"
-
-          build_local_repository() {
-            local mkndx_log="/tmp/package-index-$$.log"
-            [ -d "$LOCAL_REPO_ROOT" ] || die "Local package directory missing: $LOCAL_REPO_ROOT"
-            find "$LOCAL_REPO_ROOT" -type f -name 'packages.adb' -delete 2>/dev/null || true
-            if make package/index V=s >"$mkndx_log" 2>&1; then
-              log_info "make package/index succeeded"
-            else
-              log_warn "make package/index failed; log tail follows:"
-              tail -60 "$mkndx_log" || true
-              rm -f "$mkndx_log"
-              die "Failed to generate local APK repository indexes"
-            fi
-            rm -f "$mkndx_log"
-
-            mapfile -t LOCAL_REPO_INDEXES < <(find "$LOCAL_REPO_ROOT" -type f -name 'packages.adb' | LC_ALL=C sort)
-            [ "${#LOCAL_REPO_INDEXES[@]}" -gt 0 ] || die "No local packages.adb indexes found under $LOCAL_REPO_ROOT"
-            printf 'file://%s\n' "${LOCAL_REPO_INDEXES[@]}" > "$LOCAL_REPO_INDEX_LIST"
-            log_info "Generated ${#LOCAL_REPO_INDEXES[@]} local repository indexes"
-          }
-
-          make_combined_repositories() {
-            local repo_file="$1"
-            local dist_root target_path
-            dist_root="${OPENWRT_SDK_URL%%/targets/*}"
-            target_path=$(printf '%s' "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p')
-            [ -n "$dist_root" ] || die "Cannot derive OpenWrt dist root from SDK URL"
-            [ -n "$target_path" ] || die "Cannot derive target path from SDK URL"
-            # apk v3 repositories-file entries must point to packages.adb files,
-            # not directories. See include/feeds.mk in the OpenWrt build system.
-            cat "$LOCAL_REPO_INDEX_LIST" > "$repo_file"
-            cat >> "$repo_file" <<EOF
-          $dist_root/targets/$target_path/packages/packages.adb
-          $dist_root/packages/$ARCH_PACKAGES/base/packages.adb
-          $dist_root/packages/$ARCH_PACKAGES/packages/packages.adb
-          $dist_root/packages/$ARCH_PACKAGES/luci/packages.adb
-          $dist_root/packages/$ARCH_PACKAGES/routing/packages.adb
-          $dist_root/packages/$ARCH_PACKAGES/telephony/packages.adb
-          EOF
-            log_info "Combined repositories file:"
-            cat "$repo_file"
-          }
-
-          fetch_resolved_packages() {
-            local repo_file="$1" dest_dir="$2"
-            shift 2
-            [ "$#" -gt 0 ] || return 0
-            rm -rf "$dest_dir"
-            mkdir -p "$dest_dir"
-            log_info "Fetching ${#} package specs from combined repos\u2026"
-            "$APK_TOOL" \
-              --allow-untrusted \
-              --force-missing-repositories \
-              --force-refresh \
-              --no-interactive \
-              --no-cache \
-              --arch "$ARCH_PACKAGES" \
-              --repositories-file "$repo_file" \
-              fetch --recursive --output "$dest_dir" "$@"
-          }
-
-          group_start "Collect packages"
-          build_local_repository
-
-          TOPLEVEL_PKGS["luci-app-passwall"]=1
-          luci_spec=$(local_pkg_spec "$LOCAL_REPO_ROOT" "luci-app-passwall" || true)
-          [ -n "$luci_spec" ] || die "luci-app-passwall APK not found in local repository"
-          REQUESTED_SPECS=("$luci_spec")
-
-          zh_spec=$(local_pkg_spec "$LOCAL_REPO_ROOT" "luci-i18n-passwall-zh-cn" || true)
-          if [ -n "$zh_spec" ]; then
-            TOPLEVEL_PKGS["luci-i18n-passwall-zh-cn"]=1
-            REQUESTED_SPECS+=("$zh_spec")
-          else
-            log_info "Chinese i18n package not found (non-critical)"
-          fi
-
-          ROOT_COUNT=0
-          while IFS= read -r p; do
-            [ -n "$p" ] || continue
-            ROOT_COUNT=$((ROOT_COUNT + 1))
-            pkg_spec=$(local_pkg_spec "$LOCAL_REPO_ROOT" "$p" || true)
-            if [ -n "$pkg_spec" ]; then
-              REQUESTED_SPECS+=("$pkg_spec")
-            else
-              REQUESTED_SPECS+=("$p")
-              if map_passwall_source_dir "$p" >/dev/null 2>&1; then
-                MISSING_PKGS["$p"]=1
-              else
-                OFFICIAL_FETCH_PKGS["$p"]=1
-              fi
-            fi
-          done < "$PASSWALL_ROOTS_FILE"
-
-          printf '%s\n' "${REQUESTED_SPECS[@]}" | sed '/^$/d' | LC_ALL=C sort -u > /tmp/passwall-requested-specs.txt
-          mapfile -t REQUESTED_SPECS < /tmp/passwall-requested-specs.txt
-
-          COMBINED_REPO_FILE="$PWD/.combined-repositories"
-          make_combined_repositories "$COMBINED_REPO_FILE"
-          fetch_resolved_packages "$COMBINED_REPO_FILE" "$FETCH_DIR" "${REQUESTED_SPECS[@]}" \
-            || die "Failed to resolve dependency closure from local and official repositories"
-
-          while IFS= read -r -d '' apk_file; do
-            base_name=$(basename "$apk_file")
-            [ -f "$FETCH_DIR/$base_name" ] || cp "$apk_file" "$FETCH_DIR/"
-          done < <(find "$LOCAL_REPO_ROOT" -type f -name '*.apk' -print0)
-
-          for pkg in "${!TOPLEVEL_PKGS[@]}"; do
-            pkg_file=$(find_pkg_file "$FETCH_DIR" "$pkg" || true)
-            if [ -n "$pkg_file" ]; then
-              cp "$pkg_file" "$PAYLOAD/"
-              TOPLEVEL_FILES["$(basename "$pkg_file")"]=1
-              log_info "Collected top-level $pkg \u2192 $(basename "$pkg_file")"
-            elif [ "$pkg" = "luci-i18n-passwall-zh-cn" ]; then
-              log_info "Chinese i18n package not resolved (non-critical)"
-            else
-              die "$pkg APK not found after dependency resolution"
-            fi
-          done
-
-          while IFS= read -r -d '' apk_file; do
-            base_name=$(basename "$apk_file")
-            [ -n "${TOPLEVEL_FILES[$base_name]+x}" ] && continue
-            cp "$apk_file" "$DEPENDS/"
-          done < <(find "$FETCH_DIR" -maxdepth 1 -type f -name '*.apk' -print0)
-
-          DEP_COUNT=$(find "$DEPENDS" -maxdepth 1 -name '*.apk' | wc -l)
-          TOTAL_FETCHED=$(find "$FETCH_DIR" -maxdepth 1 -name '*.apk' | wc -l)
-          MISSING_COUNT=${#MISSING_PKGS[@]}
-          log_info "Resolved $TOTAL_FETCHED APKs and collected $DEP_COUNT dependency APKs from $ROOT_COUNT requested roots"
-          [ "$MISSING_COUNT" -gt 0 ] && log_warn "Requested packages missing from artifacts: ${!MISSING_PKGS[*]}"
-
-          {
-            SUMMARY="## Payload Dependency Closure"$'\n'
-            SUMMARY+="- Requested root packages: $ROOT_COUNT"$'\n'
-            SUMMARY+="- Resolved APK set: $TOTAL_FETCHED"$'\n'
-            SUMMARY+="- Collected dependency APKs: $DEP_COUNT"$'\n'
-            SUMMARY+="- Missing locally built requested APKs: ${#MISSING_PKGS[@]}"$'\n'
-            SUMMARY+="- Official fallback roots: ${#OFFICIAL_FETCH_PKGS[@]}"$'\n'
-            if [ "${#MISSING_PKGS[@]}" -gt 0 ]; then
-              SUMMARY+="### Missing Locally Built Requested APKs"$'\n'
-              for pkg in "${!MISSING_PKGS[@]}"; do SUMMARY+="- $pkg"$'\n'; done
-            fi
-            if [ "${#OFFICIAL_FETCH_PKGS[@]}" -gt 0 ]; then
-              SUMMARY+="### Official Fallback Roots"$'\n'
-              for pkg in "${!OFFICIAL_FETCH_PKGS[@]}"; do SUMMARY+="- $pkg"$'\n'; done
-            fi
-            gh_summary "$SUMMARY"
-          }
-          group_end
-
-          group_start "Validate payload"
-          MIN_DEPS=${MIN_REQUIRED_PACKAGES:-10}
-          [ "$DEP_COUNT" -eq 0 ] && die "No dependency APKs found"
-          [ "$DEP_COUNT" -lt "$MIN_DEPS" ] && die "Only $DEP_COUNT packages collected (expected at least $MIN_DEPS)"
-          [ "$MISSING_COUNT" -eq 0 ] || die "Some locally built PassWall packages are missing from payload"
-          [ -f "$PAYLOAD/install.sh" ] || die "install.sh missing from payload"
-          find "$PAYLOAD" -maxdepth 1 -type f \
-            \( -name "luci-app-passwall-*.apk" -o -name "luci-app-passwall_*.apk" \) \
-            -print -quit | grep -q . \
-            || die "luci-app-passwall not found in payload"
-          log_info "Payload OK: $DEP_COUNT deps"
-          group_end
-
-          step_end
-
-      # ── 打包安装文件 / Build installer ──
       - name: Build installer
         id: installer
         run: |
-          source scripts/utils.sh
-          step_start "Build installer"
+          chmod +x scripts/full-build.sh
+          ./scripts/full-build.sh \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --config "$GITHUB_WORKSPACE/config/openwrt-sdk.conf" \
+            --payload-dir "$GITHUB_WORKSPACE/payload" \
+            --output-dir "$GITHUB_WORKSPACE"
 
-          group_start "Build installer"
-          mkdir -p build/payload
-          cp -r payload/* build/payload/
-          chmod +x build/payload/install.sh
-          cd build
-
-          PW_FILE=""
-          for f in payload/luci-app-passwall-*.apk payload/luci-app-passwall_*.apk; do
-            [ -e "$f" ] && { PW_FILE=$(basename "$f"); break; }
-          done
-          [ -z "$PW_FILE" ] && die "luci-app-passwall package not found"
-          PW_VER=$(echo "$PW_FILE" | sed -E 's/luci-app-passwall[-_]//; s/[-_].*//')
-
-          ARCH=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p' | tr '/' '_')
-          [ -z "$ARCH" ] && { log_warn "Cannot extract architecture from SDK URL, using 'unknown'"; ARCH="unknown"; }
-          SDK_VER=$(echo "$OPENWRT_SDK_URL" | sed -n 's#.*/openwrt-sdk-\([0-9.]*\(-rc[0-9]*\)\?\)-.*#\1#p')
-          [ -z "$SDK_VER" ] && { log_warn "Cannot extract SDK version from SDK URL, using 'unknown'"; SDK_VER="unknown"; }
-
-          RUN_NAME="passwall_${PW_VER}_${ARCH}_sdk_${SDK_VER}.run"
-          LABEL="passwall_${PW_VER}_with_sdk_${SDK_VER}"
-
-          log_info "Building $RUN_NAME"
-          makeself --nox11 --sha256 payload "../${RUN_NAME}" "${LABEL}" ./install.sh \
-            || die "makeself failed"
-          cd ..
-          group_end
-
-          group_start "Verify installer"
-          log_info "$(file "$RUN_NAME")"
-          sh "$RUN_NAME" --check || die "Integrity check failed"
-          log_info "OK \u2014 $(du -h "$RUN_NAME" | cut -f1)"
-          group_end
-
-          gh_set_env "RUN_NAME" "$RUN_NAME"
-          echo "run_name=${RUN_NAME}" >> "$GITHUB_OUTPUT"
-
-          step_end
-
-      # ── 发布 / Publish ──
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -726,6 +122,7 @@ jobs:
           log_info "Rust: $RUST_VER"
           log_info "Disk: $DISK_AVAIL"
           log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
+          log_info "PassWall tag: ${PASSWALL_VERSION_TAG_RAW:-not set}"
           if [ -n "$INSTALLER_INFO" ]; then
             log_info "Installer: $INSTALLER_INFO"
           else
@@ -737,6 +134,7 @@ jobs:
             echo "- Rust: $RUST_VER"
             echo "- Disk: $DISK_AVAIL"
             echo "- SDK: \`${OPENWRT_SDK_URL:-not set}\`"
+            echo "- PassWall tag: \`${PASSWALL_VERSION_TAG_RAW:-not set}\`"
             [ -n "$INSTALLER_INFO" ] \
               && echo "- Installer: $INSTALLER_INFO" \
               || echo "- Installer: not built"

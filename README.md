@@ -15,6 +15,9 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 - 适配 OpenWrt 25.12+ APK 包管理器
 - 按 luci-app-passwall 的默认功能开关与目标架构条件自动分析并本地编译 PassWall 相关组件
 - 对缺失的系统依赖 APK 自动从官方 OpenWrt 源拉取并并入 `.run`
+- 固定 Go / Rust 工具链版本并校验官方安装包
+- 安装前自动校验 payload 内全部文件的 SHA256
+- 安装时优先使用 payload 内嵌的本地 APK 仓库索引，避免默认 `dnsmasq`/`ip-tiny` 等 provider 与 PassWall 依赖冲突
 - 每日自动检查上游 PassWall 稳定版并在有新版本时自动触发构建
 
 ## 快速开始 | Quick Start
@@ -37,11 +40,13 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ```
 ├── .github/workflows/
-│   ├── build-installer.yml    # 构建工作流（单文件多步骤）
+│   ├── build-installer.yml    # 构建工作流（薄封装，调用共享 full build 内核）
 │   └── sync-passwall-tag.yml  # 每日同步上游稳定版 tag
 ├── config/
 │   └── openwrt-sdk.conf       # SDK URL 配置
 ├── scripts/
+│   ├── full-build.sh          # 共享 full build 内核（Actions / 本地共用）
+│   ├── local-build.sh         # 本地 smoke/full 入口
 │   └── utils.sh               # 工具函数库（日志、重试、make 封装等）
 ├── payload/
 │   └── install.sh             # 设备安装脚本
@@ -58,7 +63,7 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 
 ### Workflow 手动触发参数 | Workflow Dispatch Inputs
 
-手动触发 workflow 时无额外输入参数，工作流始终执行完整构建。
+手动触发 workflow 时无额外输入参数；若当前运行不是 tag 触发，工作流会自动解析上游 PassWall 最新稳定版 tag，并使用对应 tag 的 `openwrt-passwall` 与 `openwrt-passwall-packages` 源码执行完整构建。
 
 ## 系统要求 | Requirements
 
@@ -69,15 +74,53 @@ Automatically compiles PassWall and all dependencies via GitHub Actions into a s
 ## 构建流程 | Build Pipeline
 
 ```
-build-installer.yml (single file, multi-step)
-  → Setup Environment → Install Toolchains (Go/Rust) → Setup SDK
-  → Configure Feeds & Patches → Compile Packages → Collect APKs
-  → Build .run Installer → Upload & Release
+build-installer.yml
+  → Setup Environment → Install Toolchains
+  → scripts/full-build.sh
+      → Load Config / Resolve Tag / Setup SDK
+      → Configure Feeds & Patches / Prepare PassWall Sources
+      → Generate .config / Compile Packages
+      → Collect APK Payload / Smoke Install Check
+      → Build .run Installer
+  → Upload & Release
 ```
 
-所有构建逻辑内联在 `build-installer.yml` 工作流的各个步骤中，共享函数通过 `scripts/utils.sh` 提供。
+`scripts/full-build.sh` 是线上 Action 和本地 `full` 模式共享的构建内核；workflow 只保留 runner 环境准备、调用共享内核、上传产物和 release 封装。本地 `scripts/local-build.sh --mode full` 也直接走同一条 full build 路径，避免线上/本地行为漂移。
 
-工作流会直接克隆 `openwrt-passwall` 与 `openwrt-passwall-packages`，从 `luci-app-passwall` 的 Makefile 自动分析默认启用的功能开关，并结合目标架构条件生成 PassWall 根包列表。编译完成后，工作流会先把本地产物构造成一个临时 APK 仓库，再让 `apk fetch --recursive` 同时从“本地仓库 + 与 SDK 同版本同架构的官方 OpenWrt 仓库”解析并抓取完整依赖闭包，最后一起打包进 `.run`。
+共享 full build 内核会根据当前构建对应的 PassWall release tag，克隆匹配 tag 的 `openwrt-passwall`，并对 `openwrt-passwall-packages` 采用“优先同名 tag、否则回退默认分支”的策略；随后从 `luci-app-passwall` 的 Makefile 自动分析默认启用的功能开关，并结合目标架构条件生成 PassWall 根包列表。编译完成后，会先把本地产物构造成一个临时 APK 仓库，再让 `apk fetch --recursive` 同时从“本地仓库 + 与 SDK 同版本同架构的官方 OpenWrt 仓库”解析并抓取完整依赖闭包，生成 payload 的 `SHA256SUMS` 校验清单，最后一起打包进 `.run`。
+
+## 本地验证入口 | Local Validation Entry
+
+可使用 `scripts/local-build.sh` 执行本地验证或本地完整打包：
+
+```bash
+./scripts/local-build.sh --tag 26.2.6-1
+```
+
+默认是 `smoke` 模式：脚本会验证配置加载、tag 解析、payload 校验、安装脚本主流程以及 `.run` 打包链路，而无需真的编译 OpenWrt SDK。
+
+若要执行本地 `full` 模式，可传入一个已准备好的 SDK 目录，以及可选的本地 PassWall 源码目录：
+
+```bash
+./scripts/local-build.sh --mode full \
+  --sdk-root /path/to/openwrt-sdk \
+  --passwall-luci-dir /path/to/openwrt-passwall \
+  --passwall-packages-dir /path/to/openwrt-passwall-packages \
+  --tag 26.2.6-1
+```
+
+`full` 模式现在直接委托给 `scripts/full-build.sh`，与 GitHub Actions 共用同一条 full build 链路。若不传 `--sdk-root`，脚本会自动根据 `OPENWRT_SDK_URL` 下载并解包 SDK；若不传本地源码目录，则会按当前 tag 自动克隆对应的 PassWall 仓库。若不传 `--tag`，脚本会自动查询上游 PassWall 最新稳定版 tag。共享 full build 还会在进入 Rust host 编译前预取并校验 `rustc` 源码包，减少本地大文件下载中途重置导致的卡顿。默认产物输出到系统临时目录下的 `passwall-local-build-output/`，可通过 `--output-dir` 自定义。
+
+如需直接调用共享 full build 内核，也可以执行：
+
+```bash
+./scripts/full-build.sh \
+  --output-dir /path/to/out \
+  --sdk-root /path/to/openwrt-sdk \
+  --passwall-luci-dir /path/to/openwrt-passwall \
+  --passwall-packages-dir /path/to/openwrt-passwall-packages \
+  --tag 26.2.6-1
+```
 
 ## 性能优化 | Performance
 
