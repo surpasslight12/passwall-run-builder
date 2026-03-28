@@ -1,0 +1,342 @@
+name: PassWall Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Workflow mode
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - sync-and-build
+      tag:
+        description: Optional PassWall tag override for build mode
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+
+jobs:
+  load-config:
+    runs-on: ubuntu-latest
+    outputs:
+      config_path: ${{ steps.config.outputs.config_path }}
+      go_version: ${{ steps.config.outputs.go_version }}
+      go_download_base_url: ${{ steps.config.outputs.go_download_base_url }}
+      go_sha256_linux_amd64: ${{ steps.config.outputs.go_sha256_linux_amd64 }}
+      rust_toolchain_version: ${{ steps.config.outputs.rust_toolchain_version }}
+      rustup_init_url_linux_amd64: ${{ steps.config.outputs.rustup_init_url_linux_amd64 }}
+      rustup_init_sha256_linux_amd64: ${{ steps.config.outputs.rustup_init_sha256_linux_amd64 }}
+      passwall_upstream_owner: ${{ steps.config.outputs.passwall_upstream_owner }}
+      passwall_upstream_repo: ${{ steps.config.outputs.passwall_upstream_repo }}
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Load centralized config
+        id: config
+        run: |
+          source scripts/utils.sh
+          load_env_config config/config.conf
+
+          required_vars=(
+            OPENWRT_SDK_URL
+            PASSWALL_UPSTREAM_OWNER
+            PASSWALL_UPSTREAM_REPO
+            GO_VERSION
+            GO_DOWNLOAD_BASE_URL
+            GO_SHA256_LINUX_AMD64
+            RUST_TOOLCHAIN_VERSION
+            RUSTUP_INIT_URL_LINUX_AMD64
+            RUSTUP_INIT_SHA256_LINUX_AMD64
+          )
+          for key in "${required_vars[@]}"; do
+            [ -n "${!key:-}" ] || die "Missing required config key: $key"
+          done
+
+          {
+            printf 'config_path=%s\n' 'config/config.conf'
+            printf 'go_version=%s\n' "$GO_VERSION"
+            printf 'go_download_base_url=%s\n' "$GO_DOWNLOAD_BASE_URL"
+            printf 'go_sha256_linux_amd64=%s\n' "$GO_SHA256_LINUX_AMD64"
+            printf 'rust_toolchain_version=%s\n' "$RUST_TOOLCHAIN_VERSION"
+            printf 'rustup_init_url_linux_amd64=%s\n' "$RUSTUP_INIT_URL_LINUX_AMD64"
+            printf 'rustup_init_sha256_linux_amd64=%s\n' "$RUSTUP_INIT_SHA256_LINUX_AMD64"
+            printf 'passwall_upstream_owner=%s\n' "$PASSWALL_UPSTREAM_OWNER"
+            printf 'passwall_upstream_repo=%s\n' "$PASSWALL_UPSTREAM_REPO"
+          } >> "$GITHUB_OUTPUT"
+
+  prepare-build:
+    needs:
+      - load-config
+    if: always() && needs.load-config.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.context.outputs.should_build }}
+      should_release: ${{ steps.context.outputs.should_release }}
+      build_tag: ${{ steps.context.outputs.build_tag }}
+      reason: ${{ steps.context.outputs.reason }}
+    steps:
+      - name: Resolve build context
+        id: context
+        uses: actions/github-script@v8
+        env:
+          UPSTREAM_OWNER: ${{ needs.load-config.outputs.passwall_upstream_owner }}
+          UPSTREAM_REPO: ${{ needs.load-config.outputs.passwall_upstream_repo }}
+          MANUAL_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || '' }}
+          MANUAL_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const eventName = context.eventName
+            const manualMode = (process.env.MANUAL_MODE || '').trim()
+            const manualTag = (process.env.MANUAL_TAG || '').trim()
+
+            let buildTag = ''
+            let shouldBuild = false
+            let shouldRelease = false
+            let reason = ''
+
+            if (eventName === 'schedule' || manualMode === 'sync-and-build') {
+              const upstreamOwner = process.env.UPSTREAM_OWNER
+              const upstreamRepo = process.env.UPSTREAM_REPO
+              const { owner, repo } = context.repo
+
+              const { data: repoInfo } = await github.rest.repos.get({ owner, repo })
+              const defaultBranch = repoInfo.default_branch
+              const { data: branchInfo } = await github.rest.repos.getBranch({ owner, repo, branch: defaultBranch })
+              const headSha = branchInfo.commit.sha
+              core.info(`Using ${defaultBranch}@${headSha} for tag creation.`)
+
+              const { data: release } = await github.rest.repos.getLatestRelease({ owner: upstreamOwner, repo: upstreamRepo })
+              const upstreamTag = (release.tag_name || '').trim()
+              if (!upstreamTag) {
+                core.setFailed('Upstream latest stable tag is empty')
+                return
+              }
+
+              const tag = upstreamTag.replace(/^v/, '')
+              const shortRef = `tags/${tag}`
+              let created = 'false'
+              try {
+                await github.rest.git.getRef({ owner, repo, ref: shortRef })
+                core.info(`Tag ${tag} already exists, skip.`)
+                created = 'false'
+              } catch (error) {
+                if (error.status !== 404) throw error
+                try {
+                  await github.rest.git.createRef({ owner, repo, ref: `refs/${shortRef}`, sha: headSha })
+                  core.info(`Pushed new tag ${tag}.`)
+                  created = 'true'
+                } catch (error) {
+                  const message = error?.response?.data?.message || error?.message || ''
+                  if (error.status === 422 && message.includes('Reference already exists')) {
+                    core.info(`Tag ${tag} already created by another run, skip.`)
+                    created = 'false'
+                  } else {
+                    throw error
+                  }
+                }
+              }
+
+              if (created === 'true') {
+                buildTag = tag
+                shouldBuild = true
+                shouldRelease = true
+                reason = 'new upstream tag synced'
+              } else {
+                reason = 'latest upstream tag already exists locally'
+              }
+            } else {
+              if (manualTag) {
+                buildTag = manualTag
+                reason = 'manual build with explicit tag'
+              } else {
+                const { data: release } = await github.rest.repos.getLatestRelease({ owner: process.env.UPSTREAM_OWNER, repo: process.env.UPSTREAM_REPO })
+                buildTag = (release.tag_name || '').trim().replace(/^v/, '')
+                reason = 'manual build with latest upstream stable tag'
+              }
+              shouldBuild = Boolean(buildTag)
+            }
+
+            core.setOutput('build_tag', buildTag)
+            core.setOutput('should_build', shouldBuild ? 'true' : 'false')
+            core.setOutput('should_release', shouldRelease ? 'true' : 'false')
+            core.setOutput('reason', reason)
+            await core.summary
+              .addHeading('Build Context')
+              .addRaw(`- Should build: \`${shouldBuild}\`\n`)
+              .addRaw(`- Should release: \`${shouldRelease}\`\n`)
+              .addRaw(`- Build tag: \`${buildTag || 'n/a'}\`\n`)
+              .addRaw(`- Reason: ${reason || 'n/a'}\n`)
+              .write()
+
+  build:
+    needs:
+      - load-config
+      - prepare-build
+    if: needs.prepare-build.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      run_name: ${{ steps.installer.outputs.run_name }}
+    defaults:
+      run:
+        shell: bash --noprofile --norc -euo pipefail {0}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup environment
+        run: |
+          source scripts/utils.sh
+          step_start "Setup environment"
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential libncurses5-dev gawk gettext unzip file \
+            libssl-dev wget python3 python3-yaml git ca-certificates makeself zstd \
+            || die "apt-get install failed"
+          step_end
+
+      - name: Install toolchains
+        run: |
+          source scripts/utils.sh
+          step_start "Install toolchains"
+
+          GO_VER="${{ needs.load-config.outputs.go_version }}"
+          GO_BASE_URL="${{ needs.load-config.outputs.go_download_base_url }}"
+          GO_TARBALL="go${GO_VER}.linux-amd64.tar.gz"
+          CURRENT_GO=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' || true)
+          if [ "$CURRENT_GO" != "$GO_VER" ]; then
+            retry 3 20 wget -q "${GO_BASE_URL}/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"
+            printf '%s  %s\n' "${{ needs.load-config.outputs.go_sha256_linux_amd64 }}" "/tmp/${GO_TARBALL}" | sha256sum -c - \
+              || die "Go tarball checksum verification failed"
+            sudo rm -rf /usr/local/go
+            sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+            rm -f "/tmp/${GO_TARBALL}"
+          fi
+          export PATH="/usr/local/go/bin:$PATH"
+          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          GO_ACTUAL=$(go version | awk '{print $3}' | sed 's/go//')
+          [ "$GO_ACTUAL" = "$GO_VER" ] || die "Go verification failed: expected $GO_VER, got $GO_ACTUAL"
+
+          RUST_VER="${{ needs.load-config.outputs.rust_toolchain_version }}"
+          if [ -f "$HOME/.cargo/env" ]; then
+            source "$HOME/.cargo/env"
+          fi
+          if ! command -v rustup >/dev/null 2>&1; then
+            RUSTUP_INIT="/tmp/rustup-init"
+            retry 3 20 wget -q "${{ needs.load-config.outputs.rustup_init_url_linux_amd64 }}" -O "$RUSTUP_INIT"
+            printf '%s  %s\n' "${{ needs.load-config.outputs.rustup_init_sha256_linux_amd64 }}" "$RUSTUP_INIT" | sha256sum -c - \
+              || die "rustup-init checksum verification failed"
+            chmod +x "$RUSTUP_INIT"
+            "$RUSTUP_INIT" -y --profile minimal --default-toolchain "$RUST_VER" --no-modify-path
+            rm -f "$RUSTUP_INIT"
+            source "$HOME/.cargo/env"
+          fi
+          retry 3 20 rustup toolchain install "$RUST_VER" --profile minimal --no-self-update
+          rustup default "$RUST_VER"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          RUST_ACTUAL=$(rustc --version | awk '{print $2}')
+          [ "$RUST_ACTUAL" = "$RUST_VER" ] || die "Rust verification failed: expected $RUST_VER, got $RUST_ACTUAL"
+          cargo --version || die "Cargo verification failed"
+
+          step_end
+
+      - name: Build installer
+        id: installer
+        run: |
+          chmod +x scripts/full-build.sh
+          ./scripts/full-build.sh \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --config "$GITHUB_WORKSPACE/${{ needs.load-config.outputs.config_path }}" \
+            --payload-dir "$GITHUB_WORKSPACE/payload" \
+            --output-dir "$GITHUB_WORKSPACE" \
+            --tag "${{ needs.prepare-build.outputs.build_tag }}" \
+            --metadata-file "$RUNNER_TEMP/build-metadata.env"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.installer.outputs.run_name }}
+          path: ${{ steps.installer.outputs.run_name }}
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          source scripts/utils.sh
+          GO_VER=$(go version 2>/dev/null || echo N/A)
+          RUST_VER=$(rustc --version 2>/dev/null || echo N/A)
+          DISK_AVAIL=$(df -h / --output=avail | tail -1 | tr -d ' ')
+          INSTALLER_INFO=""
+          if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
+            INSTALLER_INFO="${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
+          fi
+          log_info "Go: $GO_VER"
+          log_info "Rust: $RUST_VER"
+          log_info "Disk: $DISK_AVAIL"
+          log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
+          log_info "PassWall tag: ${PASSWALL_VERSION_TAG_RAW:-not set}"
+          log_info "Build reason: ${{ needs.prepare-build.outputs.reason }}"
+          if [ -n "$INSTALLER_INFO" ]; then
+            log_info "Installer: $INSTALLER_INFO"
+          else
+            log_warn "Installer: not built"
+          fi
+          {
+            echo "### Build Info"
+            echo "- Go: $GO_VER"
+            echo "- Rust: $RUST_VER"
+            echo "- Disk: $DISK_AVAIL"
+            echo "- SDK: \`${OPENWRT_SDK_URL:-not set}\`"
+            echo "- PassWall tag: \`${PASSWALL_VERSION_TAG_RAW:-not set}\`"
+            echo "- Build reason: ${{ needs.prepare-build.outputs.reason }}"
+            [ -n "$INSTALLER_INFO" ] \
+              && echo "- Installer: $INSTALLER_INFO" \
+              || echo "- Installer: not built"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    needs:
+      - prepare-build
+      - build
+    if: needs.prepare-build.outputs.should_release == 'true' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.run_name }}
+          path: .
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-build.outputs.build_tag }}
+          body: |
+            ## Run 文件使用方式 | Run File Usage
+            将 `<RUN_FILE>.run` 替换为本次发布附件中的实际文件名。
+            ```bash
+            scp <RUN_FILE>.run root@openwrt:/tmp/
+            ssh root@openwrt 'cd /tmp && chmod +x <RUN_FILE>.run && ./<RUN_FILE>.run'
+            # Optional: restart service to apply changes
+            ssh root@openwrt '/etc/init.d/passwall restart'
+            ```
+          files: ${{ needs.build.outputs.run_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
