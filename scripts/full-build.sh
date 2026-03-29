@@ -557,8 +557,11 @@ compile_full_sources() {
 
 collect_full_payload() {
   step_start "Collect payload"
-  local local_repo_root passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir combined_repo_file requested_specs_file
+  local local_repo_root local_target_repo_root local_repo_search_root
+  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir combined_repo_file requested_specs_file
   local_repo_root="$FULL_SDK_DIR/bin/packages"
+  local_target_repo_root="$FULL_SDK_DIR/bin/targets"
+  local_repo_search_root="$FULL_SDK_DIR/bin"
   passwall_roots_file="$FULL_SDK_DIR/.passwall-package-roots"
   apk_tool="$FULL_SDK_DIR/staging_dir/host/bin/apk"
   arch_packages=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\([^"]*\)"/\1/p' "$FULL_SDK_DIR/.config" | head -n 1)
@@ -579,6 +582,7 @@ collect_full_payload() {
   fi
 
   [ -d "$local_repo_root" ] || die "Local package output directory missing: $local_repo_root"
+  [ -d "$local_repo_search_root" ] || die "Local build output directory missing: $local_repo_search_root"
   [ -x "$apk_tool" ] || die "OpenWrt host apk tool not found: $apk_tool"
   [ -n "$arch_packages" ] || die "Cannot derive ARCH_PACKAGES from local .config"
 
@@ -599,8 +603,15 @@ collect_full_payload() {
       fi
       rm -f "$mkndx_log"
 
-      mapfile -t LOCAL_REPO_INDEXES < <(find "$local_repo_root" -type f -name 'packages.adb' | LC_ALL=C sort)
-      [ "${#LOCAL_REPO_INDEXES[@]}" -gt 0 ] || die "No local packages.adb indexes found under $local_repo_root"
+      mapfile -t LOCAL_REPO_INDEXES < <(
+        {
+          find "$local_repo_root" -type f -name 'packages.adb'
+          if [ -d "$local_target_repo_root" ]; then
+            find "$local_target_repo_root" -type f -path '*/packages/packages.adb'
+          fi
+        } | LC_ALL=C sort -u
+      )
+      [ "${#LOCAL_REPO_INDEXES[@]}" -gt 0 ] || die "No local packages.adb indexes found under $local_repo_root or $local_target_repo_root"
       printf 'file://%s\n' "${LOCAL_REPO_INDEXES[@]}" > "$local_repo_index_list"
     }
 
@@ -646,14 +657,14 @@ EOF
     build_local_repository
 
     toplevel_pkgs["luci-app-passwall"]=1
-    luci_spec=$(local_pkg_spec "$local_repo_root" "luci-app-passwall" || true)
+    luci_spec=$(local_pkg_spec "$local_repo_search_root" "luci-app-passwall" || true)
     [ -n "$luci_spec" ] || die "luci-app-passwall APK not found in local repository"
     REQUESTED_SPECS+=("$luci_spec")
     # Prefer dnsmasq-full as the provider for PassWall's virtual dnsmasq dependency
     # so apk does not resolve it to the conflicting minimal dnsmasq package.
     REQUESTED_SPECS+=("dnsmasq-full")
 
-    zh_spec=$(local_pkg_spec "$local_repo_root" "luci-i18n-passwall-zh-cn" || true)
+    zh_spec=$(local_pkg_spec "$local_repo_search_root" "luci-i18n-passwall-zh-cn" || true)
     if [ -n "$zh_spec" ]; then
       toplevel_pkgs["luci-i18n-passwall-zh-cn"]=1
       REQUESTED_SPECS+=("$zh_spec")
@@ -664,7 +675,7 @@ EOF
       [ -n "$pkg" ] || continue
       root_count=$((root_count + 1))
       toplevel_pkgs["$pkg"]=1
-      pkg_spec=$(local_pkg_spec "$local_repo_root" "$pkg" || true)
+      pkg_spec=$(local_pkg_spec "$local_repo_search_root" "$pkg" || true)
       if [ -n "$pkg_spec" ]; then
         REQUESTED_SPECS+=("$pkg_spec")
       else
@@ -688,7 +699,7 @@ EOF
     while IFS= read -r -d '' apk_file; do
       base_name=$(basename "$apk_file")
       [ -f "$fetch_dir/$base_name" ] || cp "$apk_file" "$fetch_dir/"
-    done < <(find "$local_repo_root" -type f -name '*.apk' -print0)
+    done < <(find "$local_repo_search_root" -type f -name '*.apk' -print0)
 
     for pkg in "${!toplevel_pkgs[@]}"; do
       pkg_file=$(find_payload_pkg_file "$fetch_dir" "$pkg" || true)
