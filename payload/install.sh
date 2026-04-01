@@ -9,6 +9,22 @@ log_warn() { printf '[WARN]  %s\n' "$*"; }
 err()      { printf '[ERROR] %s\n' "$*" >&2; }
 die()      { err "$@"; exit 1; }
 
+usage() {
+  cat <<'USAGE'
+Usage: ./install.sh [--install-mode auto|top-level|whitelist|full]
+
+Options:
+  --install-mode MODE  auto (default), top-level, whitelist, or full
+  --help               Show this help
+
+Modes:
+  auto       Use INSTALL_WHITELIST when present, otherwise fall back to TOPLEVEL_PACKAGES
+  top-level  Install only TOPLEVEL_PACKAGES plus dnsmasq-full when bundled
+  whitelist  Install INSTALL_WHITELIST plus dnsmasq-full when bundled
+  full       Install every package present in the payload
+USAGE
+}
+
 retry() {
   retry_max="$1"
   retry_delay="$2"
@@ -23,6 +39,24 @@ retry() {
     retry_i=$((retry_i + 1))
   done
 }
+
+INSTALL_MODE="${PASSWALL_INSTALL_MODE:-auto}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --install-mode)
+      INSTALL_MODE="${2:-}"
+      [ -n "$INSTALL_MODE" ] || die "--install-mode requires a value"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown argument: $1"
+      ;;
+  esac
+done
 
 # ── 检测安装包 / Detect packages ──
 log "Starting PassWall installation…"
@@ -46,12 +80,43 @@ for f in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; do
   [ -e "$f" ] && { zh_pkg="$f"; break; }
 done
 
+payload_pkg_candidates() {
+  pkg_name="$1"
+  case "$pkg_name" in
+    nftables)
+      printf '%s\n' nftables nftables-nojson nftables-json
+      ;;
+    *)
+      printf '%s\n' "$pkg_name"
+      ;;
+  esac
+}
+
+normalize_payload_pkg_name() {
+  pkg_name="$1"
+  case "$pkg_name" in
+    nftables-nojson|nftables-json)
+      printf '%s\n' nftables
+      ;;
+    *)
+      printf '%s\n' "$pkg_name"
+      ;;
+  esac
+}
+
+apk_package_name_from_file() {
+  apk_file="${1##*/}"
+  printf '%s\n' "$apk_file" | sed -E 's/[-_][0-9].*\.apk$//'
+}
+
 payload_has_pkg() {
   pkg_name="$1"
-  for f in \
-    "${pkg_name}"-*.apk "${pkg_name}"_*.apk \
-    "depends/${pkg_name}"-*.apk "depends/${pkg_name}"_*.apk; do
-    [ -e "$f" ] && return 0
+  for candidate in $(payload_pkg_candidates "$pkg_name"); do
+    for f in \
+      "${candidate}"-*.apk "${candidate}"_*.apk \
+      "depends/${candidate}"-*.apk "depends/${candidate}"_*.apk; do
+      [ -e "$f" ] && return 0
+    done
   done
   return 1
 }
@@ -67,22 +132,85 @@ append_install_pkg() {
   INSTALL_PACKAGES="$*"
 }
 
+append_install_pkg_file() {
+  list_file="$1"
+  [ -f "$list_file" ] || return 0
+
+  while IFS= read -r pkg_name; do
+    [ -n "$pkg_name" ] || continue
+    pkg_name=$(normalize_payload_pkg_name "$pkg_name")
+    set -- $INSTALL_PACKAGES
+    append_install_pkg "$pkg_name" "$@"
+  done < "$list_file"
+}
+
+append_install_pkg_dir() {
+  search_dir="$1"
+  [ -d "$search_dir" ] || return 0
+
+  for apk_file in "$search_dir"/*.apk; do
+    [ -e "$apk_file" ] || continue
+    pkg_name=$(apk_package_name_from_file "$apk_file")
+    [ -n "$pkg_name" ] || continue
+    pkg_name=$(normalize_payload_pkg_name "$pkg_name")
+    set -- $INSTALL_PACKAGES
+    append_install_pkg "$pkg_name" "$@"
+  done
+}
+
 build_install_package_list() {
   INSTALL_PACKAGES="luci-app-passwall"
   [ -n "$zh_pkg" ] && INSTALL_PACKAGES="$INSTALL_PACKAGES luci-i18n-passwall-zh-cn"
 
-  if [ -f TOPLEVEL_PACKAGES ]; then
-    while IFS= read -r pkg_name; do
-      [ -n "$pkg_name" ] || continue
-      case "$pkg_name" in
-        luci-app-passwall|luci-i18n-passwall-zh-cn)
-          continue
-          ;;
-      esac
-      set -- $INSTALL_PACKAGES
-      append_install_pkg "$pkg_name" "$@"
-    done < TOPLEVEL_PACKAGES
-  fi
+  case "$INSTALL_MODE" in
+    auto)
+      if [ -s INSTALL_WHITELIST ]; then
+        INSTALL_MODE_RESOLVED="whitelist"
+      else
+        INSTALL_MODE_RESOLVED="top-level"
+      fi
+      ;;
+    top-level|toplevel)
+      INSTALL_MODE_RESOLVED="top-level"
+      ;;
+    whitelist)
+      [ -s INSTALL_WHITELIST ] || die "INSTALL_WHITELIST not found for install mode whitelist"
+      INSTALL_MODE_RESOLVED="whitelist"
+      ;;
+    full|payload)
+      INSTALL_MODE_RESOLVED="full"
+      ;;
+    *)
+      die "Unknown install mode: $INSTALL_MODE"
+      ;;
+  esac
+
+  case "$INSTALL_MODE_RESOLVED" in
+    top-level)
+      INSTALL_PLAN_LABEL="top-level packages"
+      if [ -f TOPLEVEL_PACKAGES ]; then
+        while IFS= read -r pkg_name; do
+          [ -n "$pkg_name" ] || continue
+          case "$pkg_name" in
+            luci-app-passwall|luci-i18n-passwall-zh-cn)
+              continue
+              ;;
+          esac
+          set -- $INSTALL_PACKAGES
+          append_install_pkg "$pkg_name" "$@"
+        done < TOPLEVEL_PACKAGES
+      fi
+      ;;
+    whitelist)
+      INSTALL_PLAN_LABEL="whitelisted packages"
+      append_install_pkg_file INSTALL_WHITELIST
+      ;;
+    full)
+      INSTALL_PLAN_LABEL="payload packages"
+      append_install_pkg_dir .
+      append_install_pkg_dir depends
+      ;;
+  esac
 
   if payload_has_pkg dnsmasq-full; then
     set -- $INSTALL_PACKAGES
@@ -114,6 +242,8 @@ if [ "$USE_EMBEDDED_REPO" -eq 1 ]; then
   printf 'file://%s/packages.adb\n' "$PWD" >> "$REPO_FILE"
   [ -f depends/packages.adb ] && printf 'file://%s/depends/packages.adb\n' "$PWD" >> "$REPO_FILE"
 
+  INSTALL_MODE_RESOLVED=""
+  INSTALL_PLAN_LABEL="packages"
   build_install_package_list
   # shellcheck disable=SC2086
   set -- $INSTALL_PACKAGES
@@ -132,7 +262,8 @@ if [ "$USE_EMBEDDED_REPO" -eq 1 ]; then
   if [ -d depends ]; then
     log "Found $(find depends -maxdepth 1 -name '*.apk' 2>/dev/null | wc -l) dependency packages"
   fi
-  log "Installing top-level packages: $*"
+  log "Install mode: $INSTALL_MODE_RESOLVED"
+  log "Installing $INSTALL_PLAN_LABEL: $*"
   log "Using embedded APK repositories"
   APK_ADD_EXTRA_ARGS="--repositories-file $REPO_FILE --no-cache --force-refresh"
 else

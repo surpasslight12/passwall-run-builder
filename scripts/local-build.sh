@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-source "$SCRIPT_DIR/utils.sh"
+source "$SCRIPT_DIR/build-lib.sh"
 
 MODE="smoke"
 CONFIG_FILE="$REPO_ROOT/config/config.conf"
@@ -58,14 +58,6 @@ cleanup() {
   fi
 }
 
-require_tool() {
-  command -v "$1" >/dev/null 2>&1 || die "Required tool not found: $1"
-}
-
-trim_tag() {
-  printf '%s\n' "${1#v}"
-}
-
 prepare_workspace() {
   local cache_root="${XDG_CACHE_HOME:-${HOME:-$REPO_ROOT}/.cache}/passwall-run"
   WORKDIR=$(make_managed_tempdir "passwall-local-build" \
@@ -116,16 +108,11 @@ validate_common_inputs() {
   require_tool makeself
   require_tool file
   require_tool sha256sum
-  bash -n "$REPO_ROOT/scripts/utils.sh"
+  [ -f "$REPO_ROOT/.github/workflows/passwall.yml" ] || die "Workflow file not found: .github/workflows/passwall.yml"
+  bash -n "$REPO_ROOT/scripts/build-lib.sh"
   bash -n "$REPO_ROOT/scripts/local-build.sh"
   bash -n "$REPO_ROOT/scripts/full-build.sh"
   sh -n "$REPO_ROOT/payload/install.sh"
-  python3 - <<'PY'
-import pathlib, yaml
-root = pathlib.Path.cwd()
-for rel in ('.github/workflows/passwall.yml',):
-    yaml.safe_load((root / rel).read_text(encoding='utf-8'))
-PY
   step_end
 }
 
@@ -139,8 +126,10 @@ prepare_synthetic_payload() {
   printf 'synthetic-zh-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/luci-i18n-passwall-zh-cn-${PASSWALL_VERSION_TAG}-r1.apk"
   printf 'synthetic-xray-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/xray-core-${PASSWALL_VERSION_TAG}-r1.apk"
   printf 'synthetic-dnsmasq-full\n' > "$PAYLOAD_DIR/dnsmasq-full-1.0-r1.apk"
+  printf 'synthetic-microsocks\n' > "$PAYLOAD_DIR/depends/microsocks-1.0.5-r1.apk"
   printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/depends/example-dependency-1.0-r1.apk"
   printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\n' > "$PAYLOAD_DIR/TOPLEVEL_PACKAGES"
+  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/INSTALL_WHITELIST"
   printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/packages.adb"
   printf 'synthetic-dep-index\n' > "$PAYLOAD_DIR/depends/packages.adb"
   generate_sha256_manifest "$PAYLOAD_DIR"
@@ -160,6 +149,16 @@ run_install_smoke_test() {
 #!/bin/sh
 printf '%s\n' "$*" >> "${APK_INVOCATIONS_LOG:?}"
 case "$1" in
+  info)
+    case "${3:-}" in
+      dnsmasq|dnsmasq-dhcpv6)
+        exit 0
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
   list|del|add)
     exit 0
     ;;
@@ -172,14 +171,33 @@ MOCKAPK
     cd "$PAYLOAD_DIR"
     APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh >"$install_log" 2>&1
   ) || {
-    cat "$install_log" >&2
+    if [ -f "$install_log" ]; then
+      group_start "Local installer smoke install.log"
+      cat "$install_log" || true
+      group_end
+    fi
+    if [ -f "$apk_invocations" ]; then
+      group_start "Local installer smoke apk invocations"
+      cat "$apk_invocations" || true
+      group_end
+    fi
     die "Local installer smoke test failed"
   }
   grep -q "installed successfully" "$install_log" || die "Smoke installer output missing success marker"
-  grep -q "Installing top-level packages: .*xray-core" "$install_log" \
+  grep -q "Install mode: whitelist" "$install_log" \
+    || die "Smoke installer did not resolve INSTALL_WHITELIST in auto mode"
+  grep -q "Installing .*packages: .*xray-core" "$install_log" \
     || die "Smoke installer did not include xray-core in embedded repo install list"
+  grep -q "Installing .*packages: .*microsocks" "$install_log" \
+    || die "Smoke installer did not include microsocks from INSTALL_WHITELIST"
+  grep -q "Removing conflicting packages: dnsmasq dnsmasq-dhcpv6" "$install_log" \
+    || die "Smoke installer did not exercise dnsmasq-full conflict removal"
   grep -q "add --allow-untrusted .* xray-core" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing xray-core"
+  grep -q "add --allow-untrusted .* microsocks" "$apk_invocations" \
+    || die "Smoke installer apk add invocation missing microsocks"
+  grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations" \
+    || die "Smoke installer apk del invocation missing dnsmasq conflict removal"
   step_end
 }
 

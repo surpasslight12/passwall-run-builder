@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-source "$SCRIPT_DIR/utils.sh"
+source "$SCRIPT_DIR/build-lib.sh"
 
 CONFIG_FILE="$REPO_ROOT/config/config.conf"
 OUTPUT_DIR="$REPO_ROOT"
@@ -55,14 +55,6 @@ cleanup() {
   if [ "$KEEP_WORKDIR" -eq 0 ] && [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ]; then
     rm -rf "$WORKDIR"
   fi
-}
-
-require_tool() {
-  command -v "$1" >/dev/null 2>&1 || die "Required tool not found: $1"
-}
-
-trim_tag() {
-  printf '%s\n' "${1#v}"
 }
 
 copy_tree() {
@@ -166,7 +158,7 @@ validate_inputs() {
   require_tool makeself
   require_tool file
   require_tool sha256sum
-  bash -n "$SCRIPT_DIR/utils.sh"
+  bash -n "$SCRIPT_DIR/build-lib.sh"
   bash -n "$SCRIPT_DIR/full-build.sh"
   sh -n "$REPO_ROOT/payload/install.sh"
 
@@ -558,7 +550,7 @@ compile_full_sources() {
 collect_full_payload() {
   step_start "Collect payload"
   local local_repo_root local_target_repo_root local_repo_search_root
-  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir combined_repo_file requested_specs_file
+  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir canonical_fetch_dir combined_repo_file requested_specs_file install_whitelist_file
   local_repo_root="$FULL_SDK_DIR/bin/packages"
   local_target_repo_root="$FULL_SDK_DIR/bin/targets"
   local_repo_search_root="$FULL_SDK_DIR/bin"
@@ -567,12 +559,14 @@ collect_full_payload() {
   arch_packages=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\([^"]*\)"/\1/p' "$FULL_SDK_DIR/.config" | head -n 1)
   local_repo_index_list="$FULL_SDK_DIR/.local-repositories"
   fetch_dir="$FULL_SDK_DIR/.resolved-apks"
+  canonical_fetch_dir="$FULL_SDK_DIR/.resolved-apks-canonical"
   combined_repo_file="$FULL_SDK_DIR/.combined-repositories"
   requested_specs_file="$WORKDIR/requested-specs.txt"
+  install_whitelist_file="$PAYLOAD_DIR/INSTALL_WHITELIST"
 
   mkdir -p "$PAYLOAD_DIR/depends"
   find "$PAYLOAD_DIR" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' \) \
+    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' \) \
     -delete 2>/dev/null || true
   find "$PAYLOAD_DIR/depends" -maxdepth 1 -type f \
     \( -name '*.apk' -o -name 'packages.adb' \) \
@@ -588,7 +582,7 @@ collect_full_payload() {
 
   (
     cd "$FULL_SDK_DIR"
-    declare -A toplevel_pkgs=() top_files=() missing_pkgs=() official_fetch_pkgs=()
+    declare -A toplevel_pkgs=() top_files=() missing_pkgs=() official_fetch_pkgs=() selected_apks=() selected_apk_source=() install_whitelist_pkgs=()
     REQUESTED_SPECS=()
 
     build_local_repository() {
@@ -654,6 +648,46 @@ EOF
         fetch --recursive --output "$dest_dir" "$@"
     }
 
+    register_canonical_apk() {
+      local apk_file="$1" apk_source="$2"
+      local pkg_name current_file current_source preferred_file target_file
+
+      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+      [ -n "$pkg_name" ] || return 0
+
+      current_file="${selected_apks[$pkg_name]:-}"
+      current_source="${selected_apk_source[$pkg_name]:-}"
+      if [ -n "$current_file" ]; then
+        if [ "$current_source" != "$apk_source" ]; then
+          [ "$apk_source" = "local" ] || return 0
+          preferred_file="$apk_file"
+        else
+          preferred_file=$(prefer_newer_file_by_basename "$current_file" "$apk_file")
+          [ "$preferred_file" = "$apk_file" ] || return 0
+        fi
+        rm -f "$current_file"
+      fi
+
+      target_file="$canonical_fetch_dir/$(basename "$apk_file")"
+      cp -f "$apk_file" "$target_file"
+      selected_apks["$pkg_name"]="$target_file"
+      selected_apk_source["$pkg_name"]="$apk_source"
+    }
+
+    canonicalize_resolved_packages() {
+      local apk_file
+      rm -rf "$canonical_fetch_dir"
+      mkdir -p "$canonical_fetch_dir"
+
+      while IFS= read -r -d '' apk_file; do
+        register_canonical_apk "$apk_file" "fetched"
+      done < <(find "$fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+
+      while IFS= read -r -d '' apk_file; do
+        register_canonical_apk "$apk_file" "local"
+      done < <(find "$local_repo_search_root" -type f -name '*.apk' -print0)
+    }
+
     build_local_repository
 
     toplevel_pkgs["luci-app-passwall"]=1
@@ -695,14 +729,29 @@ EOF
     make_combined_repositories "$combined_repo_file"
     fetch_resolved_packages "$combined_repo_file" "$fetch_dir" "${REQUESTED_SPECS[@]}" \
       || die "Failed to resolve dependency closure from local and official repositories"
+    canonicalize_resolved_packages
 
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      install_whitelist_pkgs["$pkg"]=1
+    done < "$passwall_roots_file"
+    install_whitelist_pkgs["luci-app-passwall"]=1
+    [ -n "$zh_spec" ] && install_whitelist_pkgs["luci-i18n-passwall-zh-cn"]=1
     while IFS= read -r -d '' apk_file; do
-      base_name=$(basename "$apk_file")
-      [ -f "$fetch_dir/$base_name" ] || cp "$apk_file" "$fetch_dir/"
-    done < <(find "$local_repo_search_root" -type f -name '*.apk' -print0)
+      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+      [ -n "$pkg_name" ] || continue
+      if map_passwall_source_dir "$pkg_name" >/dev/null 2>&1; then
+        install_whitelist_pkgs["$pkg_name"]=1
+      fi
+    done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+    if find_payload_pkg_file "$canonical_fetch_dir" "dnsmasq-full" >/dev/null 2>&1; then
+      install_whitelist_pkgs["dnsmasq-full"]=1
+    fi
+    printf '%s\n' "${!install_whitelist_pkgs[@]}" | LC_ALL=C sort > "$install_whitelist_file"
+    [ -s "$install_whitelist_file" ] || die "Installer whitelist is empty"
 
     for pkg in "${!toplevel_pkgs[@]}"; do
-      pkg_file=$(find_payload_pkg_file "$fetch_dir" "$pkg" || true)
+      pkg_file=$(find_payload_pkg_file "$canonical_fetch_dir" "$pkg" || true)
       if [ -n "$pkg_file" ]; then
         cp "$pkg_file" "$PAYLOAD_DIR/"
         top_files["$(basename "$pkg_file")"]=1
@@ -715,7 +764,7 @@ EOF
       base_name=$(basename "$apk_file")
       [ -n "${top_files[$base_name]+x}" ] && continue
       cp "$apk_file" "$PAYLOAD_DIR/depends/"
-    done < <(find "$fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+    done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
     mapfile -t payload_top_apks < <(find "$PAYLOAD_DIR" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
     [ "${#payload_top_apks[@]}" -gt 0 ] || die "Payload root APK set is empty"
@@ -728,7 +777,7 @@ EOF
       >/dev/null || die "Failed to generate payload dependency repository index"
 
     dep_count=$(find "$PAYLOAD_DIR/depends" -maxdepth 1 -name '*.apk' | wc -l)
-    total_fetched=$(find "$fetch_dir" -maxdepth 1 -name '*.apk' | wc -l)
+    total_fetched=$(find "$canonical_fetch_dir" -maxdepth 1 -name '*.apk' | wc -l)
     missing_count=${#missing_pkgs[@]}
     min_deps=${MIN_REQUIRED_PACKAGES:-1}
 
@@ -737,6 +786,7 @@ EOF
       summary+="- Requested root packages: $root_count"$'\n'
       summary+="- Resolved APK set: $total_fetched"$'\n'
       summary+="- Collected dependency APKs: $dep_count"$'\n'
+      summary+="- Installer whitelist packages: $(wc -l < \"$install_whitelist_file\" | tr -d ' ')"$'\n'
       summary+="- Missing locally built requested APKs: $missing_count"$'\n'
       summary+="- Official fallback roots: ${#official_fetch_pkgs[@]}"$'\n'
       gh_summary "$summary"
@@ -758,7 +808,7 @@ EOF
 
 run_install_smoke_test() {
   step_start "Run installer smoke test"
-  local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary
+  local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary smoke_expected_packages smoke_expected_mode has_dnsmasq_full
   mockbin="$WORKDIR/mockbin"
   install_log="$WORKDIR/install.log"
   apk_invocations="$WORKDIR/apk-invocations.log"
@@ -769,6 +819,13 @@ run_install_smoke_test() {
   mkdir -p "$smoke_payload_dir/depends"
   cp "$REPO_ROOT/payload/install.sh" "$smoke_payload_dir/install.sh"
   cp "$PAYLOAD_DIR/TOPLEVEL_PACKAGES" "$smoke_payload_dir/TOPLEVEL_PACKAGES"
+  smoke_expected_packages="$smoke_payload_dir/TOPLEVEL_PACKAGES"
+  smoke_expected_mode="top-level"
+  if [ -f "$PAYLOAD_DIR/INSTALL_WHITELIST" ]; then
+    cp "$PAYLOAD_DIR/INSTALL_WHITELIST" "$smoke_payload_dir/INSTALL_WHITELIST"
+    smoke_expected_packages="$smoke_payload_dir/INSTALL_WHITELIST"
+    smoke_expected_mode="whitelist"
+  fi
   printf 'synthetic-root-index\n' > "$smoke_payload_dir/packages.adb"
   printf 'synthetic-dep-index\n' > "$smoke_payload_dir/depends/packages.adb"
 
@@ -777,6 +834,27 @@ run_install_smoke_test() {
     printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_payload_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
   done < "$smoke_payload_dir/TOPLEVEL_PACKAGES"
 
+  has_dnsmasq_full=0
+  if find_payload_pkg_file "$PAYLOAD_DIR" "dnsmasq-full" >/dev/null 2>&1; then
+    has_dnsmasq_full=1
+    printf 'synthetic-dnsmasq-full\n' > "$smoke_payload_dir/dnsmasq-full-1.0-r1.apk"
+  fi
+
+  if [ -f "$smoke_payload_dir/INSTALL_WHITELIST" ]; then
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      case "$pkg" in
+        luci-app-passwall|luci-i18n-passwall-zh-cn|dnsmasq-full)
+          continue
+          ;;
+      esac
+      if grep -qx "$pkg" "$smoke_payload_dir/TOPLEVEL_PACKAGES"; then
+        continue
+      fi
+      printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_payload_dir/depends/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
+    done < "$smoke_payload_dir/INSTALL_WHITELIST"
+  fi
+
   printf 'synthetic-dependency\n' > "$smoke_payload_dir/depends/example-dependency-1.0-r1.apk"
   generate_sha256_manifest "$smoke_payload_dir"
 
@@ -784,6 +862,16 @@ run_install_smoke_test() {
 #!/bin/sh
 printf '%s\n' "$*" >> "${APK_INVOCATIONS_LOG:?}"
 case "$1" in
+    info)
+      case "${3:-}" in
+        dnsmasq|dnsmasq-dhcpv6)
+          exit 0
+          ;;
+        *)
+          exit 1
+          ;;
+      esac
+      ;;
   list|del|add)
     exit 0
     ;;
@@ -799,25 +887,45 @@ MOCKAPK
     APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh >"$install_log" 2>&1
   ); then
     smoke_status="install-script exited non-zero"
+  elif ! grep -q "Install mode: $smoke_expected_mode" "$install_log"; then
+    smoke_status="install mode mismatch: expected $smoke_expected_mode"
   elif ! grep -q "installed successfully" "$install_log"; then
     smoke_status="success marker missing"
-  elif [ -f "$PAYLOAD_DIR/TOPLEVEL_PACKAGES" ]; then
+  elif [ -f "$smoke_expected_packages" ]; then
     while IFS= read -r pkg; do
       [ -n "$pkg" ] || continue
-      if ! grep -q "Installing top-level packages: .*${pkg}" "$install_log"; then
-        smoke_status="top-level package missing from smoke log: $pkg"
+      if ! grep -q "Installing .*packages: .*${pkg}" "$install_log"; then
+        smoke_status="expected package missing from smoke log: $pkg"
         break
       fi
-    done < "$PAYLOAD_DIR/TOPLEVEL_PACKAGES"
+    done < "$smoke_expected_packages"
+  fi
+
+  if [ "$smoke_status" = "ok" ] && [ "$has_dnsmasq_full" -eq 1 ]; then
+    if ! grep -q "Removing conflicting packages: dnsmasq dnsmasq-dhcpv6" "$install_log"; then
+      smoke_status="dnsmasq-full conflict removal missing"
+    elif ! grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations"; then
+      smoke_status="dnsmasq-full removal invocation missing"
+    fi
   fi
 
   if [ "$smoke_status" != "ok" ]; then
     log_warn "Installer smoke test failed (${smoke_status}); continuing with archive build"
-    [ -f "$install_log" ] && cat "$install_log" >&2 || true
+    if [ -f "$install_log" ]; then
+      group_start "Installer smoke install.log"
+      cat "$install_log" || true
+      group_end
+    fi
+    if [ -f "$apk_invocations" ]; then
+      group_start "Installer smoke apk invocations"
+      cat "$apk_invocations" || true
+      group_end
+    fi
     smoke_summary="## Installer Smoke Test"$'\n'
     smoke_summary+="- Result: failed"$'\n'
     smoke_summary+="- Reason: ${smoke_status}"$'\n'
-    smoke_summary+="- Synthetic top-level packages: $(wc -l < "$smoke_payload_dir/TOPLEVEL_PACKAGES" | tr -d ' ')"$'\n'
+    smoke_summary+="- Expected install mode: ${smoke_expected_mode}"$'\n'
+    smoke_summary+="- Synthetic package assertions: $(wc -l < "$smoke_expected_packages" | tr -d ' ')"$'\n'
     gh_summary "$smoke_summary"
   fi
 

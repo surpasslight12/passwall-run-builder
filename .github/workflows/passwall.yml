@@ -49,7 +49,7 @@ jobs:
       - name: Load centralized config
         id: config
         run: |
-          source scripts/utils.sh
+          source scripts/build-lib.sh
           load_env_config config/config.conf
 
           required_vars=(
@@ -203,19 +203,19 @@ jobs:
 
       - name: Setup environment
         run: |
-          source scripts/utils.sh
+          source scripts/build-lib.sh
           step_start "Setup environment"
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential libncurses5-dev gawk gettext unzip file \
-            libssl-dev wget python3 python3-yaml git ca-certificates makeself zstd \
+            libssl-dev wget python3 git ca-certificates makeself zstd \
             || die "apt-get install failed"
           step_end
 
       - name: Install toolchains
         run: |
-          source scripts/utils.sh
+          source scripts/build-lib.sh
           step_start "Install toolchains"
 
           GO_VER="${{ needs.load-config.outputs.go_version }}"
@@ -279,7 +279,7 @@ jobs:
       - name: Diagnostics
         if: always()
         run: |
-          source scripts/utils.sh
+          source scripts/build-lib.sh
           GO_VER=$(go version 2>/dev/null || echo N/A)
           RUST_VER=$(rustc --version 2>/dev/null || echo N/A)
           DISK_AVAIL=$(df -h / --output=avail | tail -1 | tr -d ' ')
