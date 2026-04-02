@@ -127,7 +127,7 @@ passwall.yml
 ./scripts/local-build.sh --tag 26.4.1-1
 ```
 
-默认是 `smoke` 模式：脚本会验证配置加载、tag 解析、payload 校验、安装脚本主流程以及 `.run` 打包链路，而无需真的编译 OpenWrt SDK。
+默认是 `smoke` 模式：脚本会验证配置加载、tag 解析、payload 校验、payload 依赖摘要生成、安装脚本主流程以及 `.run` 打包链路，而无需真的编译 OpenWrt SDK。
 
 若要执行本地 `full` 模式，可传入一个已准备好的 SDK 目录，以及可选的本地 PassWall 源码目录：
 

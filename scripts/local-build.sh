@@ -137,6 +137,24 @@ prepare_synthetic_payload() {
   step_end
 }
 
+run_payload_summary_regression() {
+  step_start "Run payload summary regression"
+  local whitelist_file summary_file
+  whitelist_file="$WORKDIR/payload-summary-whitelist.txt"
+  summary_file="$WORKDIR/payload-summary.txt"
+
+  printf 'luci-app-passwall\nxray-core\nmicrosocks\n' > "$whitelist_file"
+  build_payload_dependency_summary 19 87 64 "$whitelist_file" 0 2 > "$summary_file"
+
+  grep -qx -- '## Payload Dependency Closure' "$summary_file" \
+    || die "Payload summary header missing"
+  grep -qx -- '- Installer whitelist packages: 3' "$summary_file" \
+    || die "Payload summary whitelist count regression detected"
+  grep -qx -- '- Official fallback roots: 2' "$summary_file" \
+    || die "Payload summary fallback count missing"
+  step_end
+}
+
 run_install_smoke_test() {
   step_start "Run installer smoke test"
   local mockbin install_log apk_invocations
@@ -333,6 +351,7 @@ case "$MODE" in
     load_config
     resolve_tag
     prepare_synthetic_payload
+    run_payload_summary_regression
     run_install_smoke_test
     build_smoke_installer
     write_smoke_summary

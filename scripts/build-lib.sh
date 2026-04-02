@@ -285,6 +285,37 @@ generate_sha256_manifest() {
   )
 }
 
+count_file_lines() {
+  local file="$1"
+  [ -f "$file" ] || {
+    printf '0\n'
+    return 0
+  }
+  awk 'END { print NR + 0 }' "$file"
+}
+
+summary_append_line() {
+  local var_name="$1" line="$2"
+  printf -v "$var_name" '%s%s\n' "${!var_name:-}" "$line"
+}
+
+build_payload_dependency_summary() {
+  local requested_root_count="$1" resolved_apk_count="$2" dependency_apk_count="$3"
+  local whitelist_file="$4" missing_local_count="$5" official_fallback_count="$6"
+  local whitelist_count summary
+
+  whitelist_count=$(count_file_lines "$whitelist_file")
+  summary=""
+  summary_append_line summary "## Payload Dependency Closure"
+  summary_append_line summary "- Requested root packages: $requested_root_count"
+  summary_append_line summary "- Resolved APK set: $resolved_apk_count"
+  summary_append_line summary "- Collected dependency APKs: $dependency_apk_count"
+  summary_append_line summary "- Installer whitelist packages: $whitelist_count"
+  summary_append_line summary "- Missing locally built requested APKs: $missing_local_count"
+  summary_append_line summary "- Official fallback roots: $official_fallback_count"
+  printf '%s' "$summary"
+}
+
 resolve_remote_tag() {
   local repo_url="$1"
   shift

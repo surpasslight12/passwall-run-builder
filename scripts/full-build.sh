@@ -547,6 +547,49 @@ compile_full_sources() {
   step_end
 }
 
+reset_payload_dir() {
+  local payload_dir="$1"
+
+  mkdir -p "$payload_dir/depends"
+  find "$payload_dir" -maxdepth 1 -type f \
+    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' \) \
+    -delete 2>/dev/null || true
+  find "$payload_dir/depends" -maxdepth 1 -type f \
+    \( -name '*.apk' -o -name 'packages.adb' \) \
+    -delete 2>/dev/null || true
+  if [ "$(realpath "$REPO_ROOT/payload/install.sh")" != "$(realpath -m "$payload_dir/install.sh")" ]; then
+    cp "$REPO_ROOT/payload/install.sh" "$payload_dir/install.sh"
+  fi
+}
+
+write_payload_repository_indexes() {
+  local apk_tool="$1" payload_dir="$2"
+  local -a payload_top_apks payload_dep_apks
+
+  mapfile -t payload_top_apks < <(find "$payload_dir" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
+  [ "${#payload_top_apks[@]}" -gt 0 ] || die "Payload root APK set is empty"
+  "$apk_tool" --allow-untrusted mkndx --output "$payload_dir/packages.adb" "${payload_top_apks[@]}" \
+    >/dev/null || die "Failed to generate payload root repository index"
+
+  mapfile -t payload_dep_apks < <(find "$payload_dir/depends" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
+  [ "${#payload_dep_apks[@]}" -gt 0 ] || die "Payload dependency APK set is empty"
+  "$apk_tool" --allow-untrusted mkndx --output "$payload_dir/depends/packages.adb" "${payload_dep_apks[@]}" \
+    >/dev/null || die "Failed to generate payload dependency repository index"
+}
+
+emit_payload_dependency_summary() {
+  local root_count="$1" total_fetched="$2" dep_count="$3"
+  local whitelist_file="$4" missing_count="$5" official_fallback_count="$6"
+
+  gh_summary "$(build_payload_dependency_summary \
+    "$root_count" \
+    "$total_fetched" \
+    "$dep_count" \
+    "$whitelist_file" \
+    "$missing_count" \
+    "$official_fallback_count")"
+}
+
 collect_full_payload() {
   step_start "Collect payload"
   local local_repo_root local_target_repo_root local_repo_search_root
@@ -564,16 +607,7 @@ collect_full_payload() {
   requested_specs_file="$WORKDIR/requested-specs.txt"
   install_whitelist_file="$PAYLOAD_DIR/INSTALL_WHITELIST"
 
-  mkdir -p "$PAYLOAD_DIR/depends"
-  find "$PAYLOAD_DIR" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' \) \
-    -delete 2>/dev/null || true
-  find "$PAYLOAD_DIR/depends" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name 'packages.adb' \) \
-    -delete 2>/dev/null || true
-  if [ "$(realpath "$REPO_ROOT/payload/install.sh")" != "$(realpath -m "$PAYLOAD_DIR/install.sh")" ]; then
-    cp "$REPO_ROOT/payload/install.sh" "$PAYLOAD_DIR/install.sh"
-  fi
+  reset_payload_dir "$PAYLOAD_DIR"
 
   [ -d "$local_repo_root" ] || die "Local package output directory missing: $local_repo_root"
   [ -d "$local_repo_search_root" ] || die "Local build output directory missing: $local_repo_search_root"
@@ -766,31 +800,20 @@ EOF
       cp "$apk_file" "$PAYLOAD_DIR/depends/"
     done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
-    mapfile -t payload_top_apks < <(find "$PAYLOAD_DIR" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
-    [ "${#payload_top_apks[@]}" -gt 0 ] || die "Payload root APK set is empty"
-    "$apk_tool" --allow-untrusted mkndx --output "$PAYLOAD_DIR/packages.adb" "${payload_top_apks[@]}" \
-      >/dev/null || die "Failed to generate payload root repository index"
-
-    mapfile -t payload_dep_apks < <(find "$PAYLOAD_DIR/depends" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
-    [ "${#payload_dep_apks[@]}" -gt 0 ] || die "Payload dependency APK set is empty"
-    "$apk_tool" --allow-untrusted mkndx --output "$PAYLOAD_DIR/depends/packages.adb" "${payload_dep_apks[@]}" \
-      >/dev/null || die "Failed to generate payload dependency repository index"
+    write_payload_repository_indexes "$apk_tool" "$PAYLOAD_DIR"
 
     dep_count=$(find "$PAYLOAD_DIR/depends" -maxdepth 1 -name '*.apk' | wc -l)
     total_fetched=$(find "$canonical_fetch_dir" -maxdepth 1 -name '*.apk' | wc -l)
     missing_count=${#missing_pkgs[@]}
     min_deps=${MIN_REQUIRED_PACKAGES:-1}
 
-    {
-      summary="## Payload Dependency Closure"$'\n'
-      summary+="- Requested root packages: $root_count"$'\n'
-      summary+="- Resolved APK set: $total_fetched"$'\n'
-      summary+="- Collected dependency APKs: $dep_count"$'\n'
-      summary+="- Installer whitelist packages: $(wc -l < \"$install_whitelist_file\" | tr -d ' ')"$'\n'
-      summary+="- Missing locally built requested APKs: $missing_count"$'\n'
-      summary+="- Official fallback roots: ${#official_fetch_pkgs[@]}"$'\n'
-      gh_summary "$summary"
-    }
+    emit_payload_dependency_summary \
+      "$root_count" \
+      "$total_fetched" \
+      "$dep_count" \
+      "$install_whitelist_file" \
+      "$missing_count" \
+      "${#official_fetch_pkgs[@]}"
 
     [ "$dep_count" -gt 0 ] || die "No dependency APKs found"
     [ "$dep_count" -ge "$min_deps" ] || die "Only $dep_count dependency APKs collected (expected at least $min_deps)"
