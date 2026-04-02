@@ -831,12 +831,11 @@ EOF
 
 run_install_smoke_test() {
   step_start "Run installer smoke test"
-  local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary smoke_expected_packages smoke_expected_mode has_dnsmasq_full
+  local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary smoke_expected_packages smoke_expected_mode has_dnsmasq_full smoke_exit
   mockbin="$WORKDIR/mockbin"
   install_log="$WORKDIR/install.log"
   apk_invocations="$WORKDIR/apk-invocations.log"
   smoke_payload_dir="$WORKDIR/payload-smoke"
-  mkdir -p "$mockbin"
 
   rm -rf "$smoke_payload_dir"
   mkdir -p "$smoke_payload_dir/depends"
@@ -881,47 +880,27 @@ run_install_smoke_test() {
   printf 'synthetic-dependency\n' > "$smoke_payload_dir/depends/example-dependency-1.0-r1.apk"
   generate_sha256_manifest "$smoke_payload_dir"
 
-  cat > "$mockbin/apk" <<'MOCKAPK'
-#!/bin/sh
-printf '%s\n' "$*" >> "${APK_INVOCATIONS_LOG:?}"
-case "$1" in
-    info)
-      case "${3:-}" in
-        dnsmasq|dnsmasq-dhcpv6)
-          exit 0
-          ;;
-        *)
-          exit 1
-          ;;
-      esac
-      ;;
-  list|del|add)
-    exit 0
-    ;;
-esac
-exit 0
-MOCKAPK
-  chmod +x "$mockbin/apk"
-
   smoke_status="ok"
 
-  if ! (
-    cd "$smoke_payload_dir"
-    APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh >"$install_log" 2>&1
-  ); then
-    smoke_status="install-script exited non-zero"
-  elif ! grep -q "Install mode: $smoke_expected_mode" "$install_log"; then
-    smoke_status="install mode mismatch: expected $smoke_expected_mode"
-  elif ! grep -q "installed successfully" "$install_log"; then
-    smoke_status="success marker missing"
-  elif [ -f "$smoke_expected_packages" ]; then
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      if ! grep -q "Installing .*packages: .*${pkg}" "$install_log"; then
-        smoke_status="expected package missing from smoke log: $pkg"
-        break
-      fi
-    done < "$smoke_expected_packages"
+  if ! run_mocked_installer "$smoke_payload_dir" "$install_log" "$apk_invocations" "$mockbin"; then
+    smoke_exit=$?
+    smoke_status="install-script exited non-zero (${smoke_exit})"
+  else
+    if ! grep -q "Install mode: $smoke_expected_mode" "$install_log"; then
+      smoke_status="install mode mismatch: expected $smoke_expected_mode"
+    elif ! grep -q "installed successfully" "$install_log"; then
+      smoke_status="success marker missing"
+    elif ! grep -q "Using explicit payload APKs for selected packages" "$install_log"; then
+      smoke_status="explicit payload install mode missing"
+    elif [ -f "$smoke_expected_packages" ]; then
+      while IFS= read -r pkg; do
+        [ -n "$pkg" ] || continue
+        if ! grep -q "Installing .*packages: .*${pkg}" "$install_log"; then
+          smoke_status="expected package missing from smoke log: $pkg"
+          break
+        fi
+      done < "$smoke_expected_packages"
+    fi
   fi
 
   if [ "$smoke_status" = "ok" ] && [ "$has_dnsmasq_full" -eq 1 ]; then
@@ -929,11 +908,13 @@ MOCKAPK
       smoke_status="dnsmasq-full conflict removal missing"
     elif ! grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations"; then
       smoke_status="dnsmasq-full removal invocation missing"
+    elif ! grep -q -- '--force-reinstall' "$apk_invocations"; then
+      smoke_status="force-reinstall flag missing"
     fi
   fi
 
   if [ "$smoke_status" != "ok" ]; then
-    log_warn "Installer smoke test failed (${smoke_status}); continuing with archive build"
+    log_error "Installer smoke test failed (${smoke_status})"
     if [ -f "$install_log" ]; then
       group_start "Installer smoke install.log"
       cat "$install_log" || true
@@ -950,6 +931,7 @@ MOCKAPK
     smoke_summary+="- Expected install mode: ${smoke_expected_mode}"$'\n'
     smoke_summary+="- Synthetic package assertions: $(wc -l < "$smoke_expected_packages" | tr -d ' ')"$'\n'
     gh_summary "$smoke_summary"
+    die "Installer smoke test failed: ${smoke_status}"
   fi
 
   step_end

@@ -121,6 +121,21 @@ payload_has_pkg() {
   return 1
 }
 
+payload_pkg_file() {
+  pkg_name="$1"
+  for candidate in $(payload_pkg_candidates "$pkg_name"); do
+    for f in \
+      "${candidate}"-*.apk "${candidate}"_*.apk \
+      "depends/${candidate}"-*.apk "depends/${candidate}"_*.apk; do
+      [ -e "$f" ] && {
+        printf '%s\n' "$f"
+        return 0
+      }
+    done
+  done
+  return 1
+}
+
 append_install_pkg() {
   pkg_name="$1"
   shift
@@ -155,6 +170,28 @@ append_install_pkg_dir() {
     pkg_name=$(normalize_payload_pkg_name "$pkg_name")
     set -- $INSTALL_PACKAGES
     append_install_pkg "$pkg_name" "$@"
+  done
+}
+
+append_install_target() {
+  install_target="$1"
+  shift
+  [ -n "$install_target" ] || return 0
+  for existing_target in "$@"; do
+    [ "$existing_target" = "$install_target" ] && return 0
+  done
+  set -- "$@" "$install_target"
+  INSTALL_TARGETS="$*"
+}
+
+resolve_install_targets() {
+  INSTALL_TARGETS=""
+  set -- $INSTALL_PACKAGES
+  for pkg_name in "$@"; do
+    install_target=$(payload_pkg_file "$pkg_name" || true)
+    [ -n "$install_target" ] || install_target="$pkg_name"
+    set -- $INSTALL_TARGETS
+    append_install_target "$install_target" "$@"
   done
 }
 
@@ -245,8 +282,9 @@ if [ "$USE_EMBEDDED_REPO" -eq 1 ]; then
   INSTALL_MODE_RESOLVED=""
   INSTALL_PLAN_LABEL="packages"
   build_install_package_list
+  resolve_install_targets
   # shellcheck disable=SC2086
-  set -- $INSTALL_PACKAGES
+  set -- $INSTALL_TARGETS
 
   CONFLICT_REMOVALS=""
   if payload_has_pkg dnsmasq-full; then
@@ -263,8 +301,9 @@ if [ "$USE_EMBEDDED_REPO" -eq 1 ]; then
     log "Found $(find depends -maxdepth 1 -name '*.apk' 2>/dev/null | wc -l) dependency packages"
   fi
   log "Install mode: $INSTALL_MODE_RESOLVED"
-  log "Installing $INSTALL_PLAN_LABEL: $*"
+  log "Installing $INSTALL_PLAN_LABEL: $INSTALL_PACKAGES"
   log "Using embedded APK repositories"
+  log "Using explicit payload APKs for selected packages"
   APK_ADD_EXTRA_ARGS="--repositories-file $REPO_FILE --no-cache --force-refresh"
 else
   set -- "$pw_pkg"
@@ -291,7 +330,7 @@ fi
 log "Installing $pw_ver…"
 if [ -n "$APK_ADD_EXTRA_ARGS" ]; then
   # shellcheck disable=SC2086
-  apk add --allow-untrusted $APK_ADD_EXTRA_ARGS "$@" || die "Installation failed"
+  apk add --allow-untrusted --force-reinstall $APK_ADD_EXTRA_ARGS "$@" || die "Installation failed"
 else
   apk add --allow-untrusted "$@" || die "Installation failed"
 fi

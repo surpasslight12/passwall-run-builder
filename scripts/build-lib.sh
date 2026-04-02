@@ -316,6 +316,45 @@ build_payload_dependency_summary() {
   printf '%s' "$summary"
 }
 
+write_mock_apk_stub() {
+  local mock_apk="$1"
+  cat > "$mock_apk" <<'MOCKAPK'
+#!/bin/sh
+printf '%s\n' "$*" >> "${APK_INVOCATIONS_LOG:?}"
+case "$1" in
+  info)
+    case "${3:-}" in
+      dnsmasq|dnsmasq-dhcpv6)
+        exit 0
+        ;;
+      *)
+        exit 1
+        ;;
+    esac
+    ;;
+  list|del|add)
+    exit 0
+    ;;
+esac
+exit 0
+MOCKAPK
+  chmod +x "$mock_apk"
+}
+
+run_mocked_installer() {
+  local payload_dir="$1" install_log="$2" apk_invocations="$3" mockbin="$4"
+
+  mkdir -p "$mockbin"
+  : > "$install_log"
+  : > "$apk_invocations"
+  write_mock_apk_stub "$mockbin/apk"
+
+  (
+    cd "$payload_dir" || exit 1
+    APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh
+  ) >"$install_log" 2>&1
+}
+
 resolve_remote_tag() {
   local repo_url="$1"
   shift

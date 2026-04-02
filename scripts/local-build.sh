@@ -161,34 +161,8 @@ run_install_smoke_test() {
   mockbin="$WORKDIR/mockbin"
   install_log="$WORKDIR/install.log"
   apk_invocations="$WORKDIR/apk-invocations.log"
-  mkdir -p "$mockbin"
 
-  cat > "$mockbin/apk" <<'MOCKAPK'
-#!/bin/sh
-printf '%s\n' "$*" >> "${APK_INVOCATIONS_LOG:?}"
-case "$1" in
-  info)
-    case "${3:-}" in
-      dnsmasq|dnsmasq-dhcpv6)
-        exit 0
-        ;;
-      *)
-        exit 1
-        ;;
-    esac
-    ;;
-  list|del|add)
-    exit 0
-    ;;
-esac
-exit 0
-MOCKAPK
-  chmod +x "$mockbin/apk"
-
-  (
-    cd "$PAYLOAD_DIR"
-    APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh >"$install_log" 2>&1
-  ) || {
+  run_mocked_installer "$PAYLOAD_DIR" "$install_log" "$apk_invocations" "$mockbin" || {
     if [ -f "$install_log" ]; then
       group_start "Local installer smoke install.log"
       cat "$install_log" || true
@@ -204,16 +178,18 @@ MOCKAPK
   grep -q "installed successfully" "$install_log" || die "Smoke installer output missing success marker"
   grep -q "Install mode: whitelist" "$install_log" \
     || die "Smoke installer did not resolve INSTALL_WHITELIST in auto mode"
+  grep -q "Using explicit payload APKs for selected packages" "$install_log" \
+    || die "Smoke installer did not switch to explicit payload APK targets"
   grep -q "Installing .*packages: .*xray-core" "$install_log" \
     || die "Smoke installer did not include xray-core in embedded repo install list"
   grep -q "Installing .*packages: .*microsocks" "$install_log" \
     || die "Smoke installer did not include microsocks from INSTALL_WHITELIST"
   grep -q "Removing conflicting packages: dnsmasq dnsmasq-dhcpv6" "$install_log" \
     || die "Smoke installer did not exercise dnsmasq-full conflict removal"
-  grep -q "add --allow-untrusted .* xray-core" "$apk_invocations" \
-    || die "Smoke installer apk add invocation missing xray-core"
-  grep -q "add --allow-untrusted .* microsocks" "$apk_invocations" \
-    || die "Smoke installer apk add invocation missing microsocks"
+  grep -q "add --allow-untrusted --force-reinstall .*xray-core-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
+    || die "Smoke installer apk add invocation missing xray-core payload APK"
+  grep -q "add --allow-untrusted --force-reinstall .*depends/microsocks-1.0.5-r1.apk" "$apk_invocations" \
+    || die "Smoke installer apk add invocation missing microsocks payload APK"
   grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations" \
     || die "Smoke installer apk del invocation missing dnsmasq conflict removal"
   step_end
