@@ -80,6 +80,8 @@ for f in luci-i18n-passwall-zh-cn-*.apk luci-i18n-passwall-zh-cn_*.apk; do
   [ -e "$f" ] && { zh_pkg="$f"; break; }
 done
 
+PAYLOAD_PACKAGE_MAP_FILE="PAYLOAD_APK_MAP"
+
 payload_pkg_candidates() {
   pkg_name="$1"
   case "$pkg_name" in
@@ -110,18 +112,25 @@ apk_package_name_from_file() {
 }
 
 payload_has_pkg() {
+  payload_pkg_file "$1" >/dev/null 2>&1
+}
+
+payload_pkg_file_from_manifest() {
   pkg_name="$1"
+  [ -f "$PAYLOAD_PACKAGE_MAP_FILE" ] || return 1
+
   for candidate in $(payload_pkg_candidates "$pkg_name"); do
-    for f in \
-      "${candidate}"-*.apk "${candidate}"_*.apk \
-      "depends/${candidate}"-*.apk "depends/${candidate}"_*.apk; do
-      [ -e "$f" ] && return 0
-    done
+    manifest_path=$(awk -F'|' -v pkg="$candidate" '$1 == pkg { print $2; exit }' "$PAYLOAD_PACKAGE_MAP_FILE")
+    [ -n "$manifest_path" ] || continue
+    [ -e "$manifest_path" ] || continue
+    printf '%s\n' "$manifest_path"
+    return 0
   done
+
   return 1
 }
 
-payload_pkg_file() {
+payload_pkg_file_from_globs() {
   pkg_name="$1"
   for candidate in $(payload_pkg_candidates "$pkg_name"); do
     for f in \
@@ -134,6 +143,12 @@ payload_pkg_file() {
     done
   done
   return 1
+}
+
+payload_pkg_file() {
+  pkg_name="$1"
+  payload_pkg_file_from_manifest "$pkg_name" && return 0
+  payload_pkg_file_from_globs "$pkg_name"
 }
 
 append_install_pkg() {
@@ -189,10 +204,11 @@ resolve_install_targets() {
   set -- $INSTALL_PACKAGES
   for pkg_name in "$@"; do
     install_target=$(payload_pkg_file "$pkg_name" || true)
-    [ -n "$install_target" ] || install_target="$pkg_name"
+    [ -n "$install_target" ] || die "Payload APK missing for requested package: $pkg_name"
     set -- $INSTALL_TARGETS
     append_install_target "$install_target" "$@"
   done
+  [ -n "$INSTALL_TARGETS" ] || die "No explicit payload install targets resolved"
 }
 
 build_install_package_list() {
@@ -303,6 +319,7 @@ if [ "$USE_EMBEDDED_REPO" -eq 1 ]; then
   log "Install mode: $INSTALL_MODE_RESOLVED"
   log "Installing $INSTALL_PLAN_LABEL: $INSTALL_PACKAGES"
   log "Using embedded APK repositories"
+  [ -f "$PAYLOAD_PACKAGE_MAP_FILE" ] && log "Using payload package manifest: $PAYLOAD_PACKAGE_MAP_FILE"
   log "Using explicit payload APKs for selected packages"
   APK_ADD_EXTRA_ARGS="--repositories-file $REPO_FILE --no-cache --force-refresh"
 else

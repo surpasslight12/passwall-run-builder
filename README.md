@@ -18,6 +18,7 @@ Builds PassWall components and required APK dependencies via GitHub Actions into
 - 固定 Go / Rust 工具链版本并校验官方安装包
 - 安装前自动校验 payload 内全部文件的 SHA256
 - 安装时优先使用 payload 内嵌的本地 APK 仓库索引，避免默认 `dnsmasq`/`ip-tiny` 等 provider 与 PassWall 依赖冲突
+- payload 会额外生成显式包名到 APK 路径的 manifest，安装时优先按该 manifest 精确重装内嵌组件，避免同版本组件被误判为已安装
 - 安装器支持 `auto` / `top-level` / `whitelist` / `full` 模式，默认优先安装构建时生成的 PassWall 组件白名单
 - payload 在打包前按包名去重，优先保留本地编译版本，减少版本漂移
 - 支持手动触发构建，也支持定时同步上游稳定版 tag 后自动构建

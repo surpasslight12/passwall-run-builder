@@ -316,6 +316,37 @@ build_payload_dependency_summary() {
   printf '%s' "$summary"
 }
 
+payload_package_manifest_name() {
+  printf '%s\n' "PAYLOAD_APK_MAP"
+}
+
+write_payload_package_manifest() {
+  local payload_dir="$1" manifest_path apk_file rel_path pkg_name current_path preferred_path
+  declare -A pkg_paths=()
+
+  manifest_path="$payload_dir/$(payload_package_manifest_name)"
+  while IFS= read -r -d '' apk_file; do
+    rel_path="${apk_file#"$payload_dir"/}"
+    pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+    [ -n "$pkg_name" ] || continue
+
+    current_path="${pkg_paths[$pkg_name]:-}"
+    if [ -n "$current_path" ]; then
+      preferred_path=$(prefer_newer_file_by_basename "$payload_dir/$current_path" "$apk_file")
+      [ "$preferred_path" = "$apk_file" ] || continue
+    fi
+    pkg_paths["$pkg_name"]="$rel_path"
+  done < <(find "$payload_dir" -maxdepth 2 -type f -name '*.apk' -print0)
+
+  : > "$manifest_path"
+  while IFS= read -r pkg_name; do
+    [ -n "$pkg_name" ] || continue
+    printf '%s|%s\n' "$pkg_name" "${pkg_paths[$pkg_name]}" >> "$manifest_path"
+  done < <(printf '%s\n' "${!pkg_paths[@]}" | LC_ALL=C sort)
+
+  [ -s "$manifest_path" ] || die "Payload package manifest is empty: $manifest_path"
+}
+
 write_mock_apk_stub() {
   local mock_apk="$1"
   cat > "$mock_apk" <<'MOCKAPK'
@@ -332,7 +363,45 @@ case "$1" in
         ;;
     esac
     ;;
-  list|del|add)
+  list|del)
+    exit 0
+    ;;
+  add)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --allow-untrusted|--force-reinstall|--force-refresh|--no-cache|--no-interactive)
+          shift
+          ;;
+        --repositories-file|--arch|--repository)
+          [ "$#" -ge 2 ] || exit 9
+          shift 2
+          ;;
+        --repositories-file=*|--arch=*|--repository=*)
+          shift
+          ;;
+        --*)
+          shift
+          ;;
+        *)
+          break
+          ;;
+      esac
+    done
+
+    if [ "${APK_MOCK_REQUIRE_APK_FILES:-0}" = "1" ]; then
+      [ "$#" -gt 0 ] || exit 10
+      for install_target in "$@"; do
+        case "$install_target" in
+          *.apk)
+            ;;
+          *)
+            printf 'expected explicit apk payload target, got: %s\n' "$install_target" >&2
+            exit 11
+            ;;
+        esac
+      done
+    fi
     exit 0
     ;;
 esac
@@ -351,7 +420,10 @@ run_mocked_installer() {
 
   (
     cd "$payload_dir" || exit 1
-    APK_INVOCATIONS_LOG="$apk_invocations" PATH="$mockbin:$PATH" sh ./install.sh
+    APK_INVOCATIONS_LOG="$apk_invocations" \
+    APK_MOCK_REQUIRE_APK_FILES=1 \
+    PATH="$mockbin:$PATH" \
+    sh ./install.sh
   ) >"$install_log" 2>&1
 }
 

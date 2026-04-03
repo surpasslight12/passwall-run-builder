@@ -130,6 +130,7 @@ prepare_synthetic_payload() {
   printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/depends/example-dependency-1.0-r1.apk"
   printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\n' > "$PAYLOAD_DIR/TOPLEVEL_PACKAGES"
   printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/INSTALL_WHITELIST"
+  write_payload_package_manifest "$PAYLOAD_DIR"
   printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/packages.adb"
   printf 'synthetic-dep-index\n' > "$PAYLOAD_DIR/depends/packages.adb"
   generate_sha256_manifest "$PAYLOAD_DIR"
@@ -178,6 +179,8 @@ run_install_smoke_test() {
   grep -q "installed successfully" "$install_log" || die "Smoke installer output missing success marker"
   grep -q "Install mode: whitelist" "$install_log" \
     || die "Smoke installer did not resolve INSTALL_WHITELIST in auto mode"
+  [ -s "$PAYLOAD_DIR/$(payload_package_manifest_name)" ] \
+    || die "Smoke payload package manifest missing"
   grep -q "Using explicit payload APKs for selected packages" "$install_log" \
     || die "Smoke installer did not switch to explicit payload APK targets"
   grep -q "Installing .*packages: .*xray-core" "$install_log" \

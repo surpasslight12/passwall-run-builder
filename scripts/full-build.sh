@@ -800,6 +800,7 @@ EOF
       cp "$apk_file" "$PAYLOAD_DIR/depends/"
     done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
+    write_payload_package_manifest "$PAYLOAD_DIR"
     write_payload_repository_indexes "$apk_tool" "$PAYLOAD_DIR"
 
     dep_count=$(find "$PAYLOAD_DIR/depends" -maxdepth 1 -name '*.apk' | wc -l)
@@ -878,12 +879,14 @@ run_install_smoke_test() {
   fi
 
   printf 'synthetic-dependency\n' > "$smoke_payload_dir/depends/example-dependency-1.0-r1.apk"
+  write_payload_package_manifest "$smoke_payload_dir"
   generate_sha256_manifest "$smoke_payload_dir"
 
   smoke_status="ok"
+  smoke_exit=0
 
-  if ! run_mocked_installer "$smoke_payload_dir" "$install_log" "$apk_invocations" "$mockbin"; then
-    smoke_exit=$?
+  run_mocked_installer "$smoke_payload_dir" "$install_log" "$apk_invocations" "$mockbin" || smoke_exit=$?
+  if [ "$smoke_exit" -ne 0 ]; then
     smoke_status="install-script exited non-zero (${smoke_exit})"
   else
     if ! grep -q "Install mode: $smoke_expected_mode" "$install_log"; then
