@@ -412,18 +412,29 @@ MOCKAPK
 
 run_mocked_installer() {
   local payload_dir="$1" install_log="$2" apk_invocations="$3" mockbin="$4"
+  local -a shell_cmd
+  local shell_label
 
   mkdir -p "$mockbin"
   : > "$install_log"
   : > "$apk_invocations"
   write_mock_apk_stub "$mockbin/apk"
 
+  if command -v busybox >/dev/null 2>&1; then
+    shell_cmd=(busybox sh)
+  else
+    shell_cmd=(sh)
+  fi
+  shell_label="${shell_cmd[*]}"
+
   (
     cd "$payload_dir" || exit 1
-    APK_INVOCATIONS_LOG="$apk_invocations" \
-    APK_MOCK_REQUIRE_APK_FILES=1 \
-    PATH="$mockbin:$PATH" \
-    sh ./install.sh
+    printf '[INFO]  Smoke shell: %s\n' "$shell_label"
+    env \
+      APK_INVOCATIONS_LOG="$apk_invocations" \
+      APK_MOCK_REQUIRE_APK_FILES=1 \
+      PATH="$mockbin:$PATH" \
+      "${shell_cmd[@]}" ./install.sh
   ) >"$install_log" 2>&1
 }
 

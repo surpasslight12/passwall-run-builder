@@ -2,7 +2,9 @@
 # install.sh — PassWall 一键安装脚本 (OpenWrt APK)
 # PassWall installer for OpenWrt (APK package manager)
 set -eu
-set -o pipefail 2>/dev/null || true
+if (set -o pipefail) 2>/dev/null; then
+  set -o pipefail
+fi
 
 log()      { printf '[INFO]  %s\n' "$*"; }
 log_warn() { printf '[WARN]  %s\n' "$*"; }
