@@ -12,31 +12,28 @@ die()      { err "$@"; exit 1; }
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [--install-mode auto|whitelist|full] [--force-reinstall]
+Usage: ./install.sh [--auto|--full]
 
 Options:
-  --install-mode MODE  auto (default), whitelist, or full
-  --force-reinstall   Force reinstall payload package files (may overwrite newer installed versions)
+  --auto              Install packages listed in INSTALL_WHITELIST (default)
+  --full              Install every package listed by PAYLOAD_APK_MAP
   --help               Show this help
 
 Modes:
-  auto       Use INSTALL_WHITELIST (same behavior as whitelist)
-  whitelist  Install INSTALL_WHITELIST plus dnsmasq-full when present
+  auto       Install INSTALL_WHITELIST plus dnsmasq-full when present
   full       Install every package listed by PAYLOAD_APK_MAP
 USAGE
 }
 
-INSTALL_MODE="${PASSWALL_INSTALL_MODE:-auto}"
-FORCE_REINSTALL="${PASSWALL_INSTALL_FORCE_REINSTALL:-0}"
+INSTALL_MODE="auto"
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --install-mode)
-      INSTALL_MODE="${2:-}"
-      [ -n "$INSTALL_MODE" ] || die "--install-mode requires a value"
-      shift 2
+    --auto)
+      INSTALL_MODE="auto"
+      shift
       ;;
-    --force-reinstall)
-      FORCE_REINSTALL=1
+    --full)
+      INSTALL_MODE="full"
       shift
       ;;
     --help|-h)
@@ -170,6 +167,93 @@ resolve_install_targets() {
   [ -n "$INSTALL_TARGETS" ] || die "No explicit payload install targets resolved"
 }
 
+installed_pkg_version() {
+  pkg_name="$1"
+  apk list -I "$pkg_name" 2>/dev/null \
+    | awk -v pkg="$pkg_name" '
+      {
+        token=$1
+        if (index(token, pkg "-") == 1 || index(token, pkg "_") == 1) {
+          print substr(token, length(pkg) + 2)
+          exit
+        }
+      }
+    '
+}
+
+payload_pkg_version_from_target() {
+  pkg_name="$1"
+  install_target="$2"
+  target_base=$(basename "$install_target")
+  target_base=${target_base%.apk}
+
+  case "$target_base" in
+    "${pkg_name}-"*)
+      printf '%s\n' "${target_base#${pkg_name}-}"
+      ;;
+    "${pkg_name}_"*)
+      printf '%s\n' "${target_base#${pkg_name}_}"
+      ;;
+  esac
+}
+
+compare_apk_versions() {
+  lhs="$1"
+  rhs="$2"
+  cmp=$(apk version -t "$lhs" "$rhs" 2>/dev/null || true)
+  case "$cmp" in
+    '<'|'>'|'=')
+      printf '%s\n' "$cmp"
+      ;;
+    *)
+      printf '?\n'
+      ;;
+  esac
+}
+
+filter_install_targets_by_version() {
+  FILTERED_INSTALL_TARGETS=""
+  FILTERED_INSTALL_PACKAGES=""
+
+  set -- $INSTALL_PACKAGES
+  for pkg_name in "$@"; do
+    install_target=$(payload_pkg_file "$pkg_name" || true)
+    [ -n "$install_target" ] || continue
+
+    installed_ver=$(installed_pkg_version "$pkg_name" || true)
+    payload_ver=$(payload_pkg_version_from_target "$pkg_name" "$install_target" || true)
+
+    if [ -n "$installed_ver" ] && [ -n "$payload_ver" ]; then
+      cmp=$(compare_apk_versions "$payload_ver" "$installed_ver")
+      case "$cmp" in
+        '<')
+          log_warn "Skip $pkg_name: installed $installed_ver is newer than payload $payload_ver"
+          continue
+          ;;
+        '=')
+          log "Skip $pkg_name: already installed at same version $installed_ver"
+          continue
+          ;;
+        '?')
+          log_warn "Skip $pkg_name: unable to compare payload $payload_ver with installed $installed_ver"
+          continue
+          ;;
+      esac
+    fi
+
+    set -- $FILTERED_INSTALL_TARGETS
+    append_install_target "$install_target" "$@"
+    FILTERED_INSTALL_TARGETS="$INSTALL_TARGETS"
+
+    set -- $FILTERED_INSTALL_PACKAGES
+    append_install_pkg "$pkg_name" "$@"
+    FILTERED_INSTALL_PACKAGES="$INSTALL_PACKAGES"
+  done
+
+  INSTALL_TARGETS="$FILTERED_INSTALL_TARGETS"
+  INSTALL_PACKAGES="$FILTERED_INSTALL_PACKAGES"
+}
+
 build_install_package_list() {
   INSTALL_PACKAGES="luci-app-passwall"
   if payload_has_pkg "luci-i18n-passwall-zh-cn"; then
@@ -179,23 +263,19 @@ build_install_package_list() {
   case "$INSTALL_MODE" in
     auto)
       [ -s "$WHITELIST_FILE" ] || die "INSTALL_WHITELIST not found for install mode auto"
-      INSTALL_MODE_RESOLVED="whitelist"
-      ;;
-    whitelist)
-      [ -s "$WHITELIST_FILE" ] || die "INSTALL_WHITELIST not found for install mode whitelist"
-      INSTALL_MODE_RESOLVED="whitelist"
+      INSTALL_MODE_RESOLVED="auto"
       ;;
     full)
       INSTALL_MODE_RESOLVED="full"
       ;;
     *)
-      die "Unknown install mode: $INSTALL_MODE (expected auto|whitelist|full)"
+      die "Unknown install mode: $INSTALL_MODE (expected auto|full)"
       ;;
   esac
 
   case "$INSTALL_MODE_RESOLVED" in
-    whitelist)
-      INSTALL_PLAN_LABEL="whitelisted packages"
+    auto)
+      INSTALL_PLAN_LABEL="auto packages"
       append_packages_from_file "$WHITELIST_FILE"
       ;;
     full)
@@ -265,6 +345,13 @@ log "PassWall: $pw_ver ($pw_pkg)"
 
 build_install_package_list
 resolve_install_targets
+filter_install_targets_by_version
+
+if [ -z "$INSTALL_TARGETS" ]; then
+  log "All selected payload packages are already up-to-date (or newer) on the device"
+  log "Nothing to install"
+  exit 0
+fi
 
 REPO_FILE="${TMPDIR:-/tmp}/passwall-apk-repositories.$$"
 cleanup() {
@@ -293,28 +380,13 @@ log "Install mode: $INSTALL_MODE_RESOLVED"
 log "Installing $INSTALL_PLAN_LABEL: $INSTALL_PACKAGES"
 log "Using payload package manifest: $PAYLOAD_MAP_FILE"
 log "Using explicit payload APKs for selected packages"
-
-if [ "$FORCE_REINSTALL" = "1" ]; then
-  APK_ADD_FLAGS="--allow-untrusted --force-reinstall"
-  log_warn "Force reinstall enabled; payload packages may replace newer installed versions"
-else
-  APK_ADD_FLAGS="--allow-untrusted"
-  log "Force reinstall disabled; installer avoids forced overwrite of installed packages"
-fi
-
-if apk list -I luci-app-passwall 2>/dev/null | grep -q "luci-app-passwall"; then
-  INSTALLED_VER=$(apk list -I luci-app-passwall 2>/dev/null | sed -E 's/.*-([0-9][^ ]*).*/\1/' | head -1)
-  log "Installed version: ${INSTALLED_VER:-unknown}, new version: $pw_ver"
-  log "Removing existing PassWall before install"
-  apk del luci-app-passwall luci-i18n-passwall-zh-cn 2>/dev/null || true
-fi
+APK_ADD_FLAGS="--allow-untrusted"
+log "Safe install enabled; installer skips payload packages that are same/newer on device"
 
 log "Installing $pw_ver..."
 # shellcheck disable=SC2086
 apk add $APK_ADD_FLAGS \
   --repositories-file "$REPO_FILE" \
-  --no-cache \
-  --force-refresh \
   $INSTALL_TARGETS \
   || die "Installation failed"
 

@@ -68,19 +68,16 @@ payload/install.sh           # 设备安装脚本
 
 ## 安装器模式
 
-- `auto`：等价于 `whitelist`
-- `whitelist`：安装白名单
+- `auto`：安装白名单（默认）
 - `full`：安装 payload 全部 APK
 
-默认不会强制重装（不带 `--force-reinstall`），用于避免 payload 中旧版本覆盖设备已安装的新版本。
-
-如需强制覆盖，可显式添加：`--force-reinstall`，或设置环境变量 `PASSWALL_INSTALL_FORCE_REINSTALL=1`。
+安装器默认启用版本保护：当设备已安装同版本或更高版本时，跳过 payload 中对应包，避免旧版本覆盖新版本。
 
 设备安装示例：
 
 ```bash
 scp passwall_*.run root@openwrt:/tmp/
-ssh root@openwrt 'cd /tmp && chmod +x passwall_*.run && ./passwall_*.run --install-mode whitelist'
+ssh root@openwrt 'cd /tmp && chmod +x passwall_*.run && ./passwall_*.run --auto'
 ```
 
 ## 输出物

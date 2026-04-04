@@ -492,7 +492,7 @@ case "$1" in
     shift
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --allow-untrusted|--force-reinstall|--force-refresh|--no-cache|--no-interactive)
+        --allow-untrusted|--no-interactive)
           shift
           ;;
         --repositories-file|--arch|--repository)

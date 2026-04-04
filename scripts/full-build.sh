@@ -981,7 +981,7 @@ run_install_smoke_test() {
     || die "Smoke payload missing INSTALL_WHITELIST"
   cp "$PAYLOAD_DIR/$(payload_install_whitelist_name)" "$smoke_whitelist_file"
   smoke_expected_packages="$smoke_whitelist_file"
-  smoke_expected_mode="whitelist"
+  smoke_expected_mode="auto"
   printf 'synthetic-root-index\n' > "$smoke_payload_dir/$(payload_repo_index_name)"
 
   while IFS= read -r pkg; do

@@ -176,8 +176,8 @@ run_install_smoke_test() {
     die "Local installer smoke test failed"
   }
   grep -q "installed successfully" "$install_log" || die "Smoke installer output missing success marker"
-  grep -q "Install mode: whitelist" "$install_log" \
-    || die "Smoke installer did not resolve INSTALL_WHITELIST in auto mode"
+  grep -q "Install mode: auto" "$install_log" \
+    || die "Smoke installer did not run in auto mode"
   [ -s "$PAYLOAD_DIR/$(payload_package_manifest_name)" ] \
     || die "Smoke payload package manifest missing"
   grep -q "Using explicit payload APKs for selected packages" "$install_log" \
