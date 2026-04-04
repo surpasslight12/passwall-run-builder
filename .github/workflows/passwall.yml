@@ -30,10 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       config_path: ${{ steps.config.outputs.config_path }}
-      go_version: ${{ steps.config.outputs.go_version }}
-      rust_toolchain_version: ${{ steps.config.outputs.rust_toolchain_version }}
-      passwall_upstream_owner: ${{ steps.config.outputs.passwall_upstream_owner }}
-      passwall_upstream_repo: ${{ steps.config.outputs.passwall_upstream_repo }}
     defaults:
       run:
         shell: bash --noprofile --norc -euo pipefail {0}
@@ -48,23 +44,13 @@ jobs:
           source scripts/build-lib.sh
           load_env_config config/config.conf
 
-          required_vars=(
-            OPENWRT_SDK_URL
-            PASSWALL_UPSTREAM_OWNER
-            PASSWALL_UPSTREAM_REPO
-            GO_VERSION
-            RUST_TOOLCHAIN_VERSION
-          )
+          required_vars=(OPENWRT_SDK_URL)
           for key in "${required_vars[@]}"; do
             [ -n "${!key:-}" ] || die "Missing required config key: $key"
           done
 
           {
             printf 'config_path=%s\n' 'config/config.conf'
-            printf 'go_version=%s\n' "$GO_VERSION"
-            printf 'rust_toolchain_version=%s\n' "$RUST_TOOLCHAIN_VERSION"
-            printf 'passwall_upstream_owner=%s\n' "$PASSWALL_UPSTREAM_OWNER"
-            printf 'passwall_upstream_repo=%s\n' "$PASSWALL_UPSTREAM_REPO"
           } >> "$GITHUB_OUTPUT"
 
   prepare-build:
@@ -82,8 +68,8 @@ jobs:
         id: context
         uses: actions/github-script@v8
         env:
-          UPSTREAM_OWNER: ${{ needs.load-config.outputs.passwall_upstream_owner }}
-          UPSTREAM_REPO: ${{ needs.load-config.outputs.passwall_upstream_repo }}
+          UPSTREAM_OWNER: Openwrt-Passwall
+          UPSTREAM_REPO: openwrt-passwall
           MANUAL_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || '' }}
           MANUAL_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
         with:
@@ -181,6 +167,9 @@ jobs:
     timeout-minutes: 360
     outputs:
       run_name: ${{ steps.installer.outputs.run_name }}
+    env:
+      GO_VERSION: 1.26.1
+      RUST_TOOLCHAIN_VERSION: 1.94.0
     defaults:
       run:
         shell: bash --noprofile --norc -euo pipefail {0}
@@ -205,7 +194,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ needs.load-config.outputs.go_version }}
+          go-version: ${{ env.GO_VERSION }}
           check-latest: true
           cache: false
 
@@ -214,11 +203,11 @@ jobs:
           source scripts/build-lib.sh
           step_start "Install toolchains"
 
-          GO_VER="${{ needs.load-config.outputs.go_version }}"
+          GO_VER="$GO_VERSION"
           GO_ACTUAL=$(go version | awk '{print $3}' | sed 's/go//')
           [ "$GO_ACTUAL" = "$GO_VER" ] || die "Go verification failed: expected $GO_VER, got $GO_ACTUAL"
 
-          RUST_VER="${{ needs.load-config.outputs.rust_toolchain_version }}"
+          RUST_VER="$RUST_TOOLCHAIN_VERSION"
           if [ -f "$HOME/.cargo/env" ]; then
             source "$HOME/.cargo/env"
           fi
@@ -238,14 +227,12 @@ jobs:
       - name: Build installer
         id: installer
         run: |
-          chmod +x scripts/full-build.sh
-          ./scripts/full-build.sh \
-            --repo-root "$GITHUB_WORKSPACE" \
+          chmod +x scripts/local-build.sh
+          ./scripts/local-build.sh \
+            --mode full \
             --config "$GITHUB_WORKSPACE/${{ needs.load-config.outputs.config_path }}" \
-            --payload-dir "$GITHUB_WORKSPACE/payload" \
             --output-dir "$GITHUB_WORKSPACE" \
-            --tag "${{ needs.prepare-build.outputs.build_tag }}" \
-            --metadata-file "$RUNNER_TEMP/build-metadata.env"
+            --tag "${{ needs.prepare-build.outputs.build_tag }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

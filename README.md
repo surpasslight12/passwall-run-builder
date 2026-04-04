@@ -8,6 +8,8 @@
 - 只会编译：PassWall 本体 + 必选组件 + 已选可选组件。
 - `shadowsocks-libev` / `shadowsocks-rust` / `v2ray-plugin` 默认移入未选列表，按需启用。
 
+详细删减清单与迁移说明见 [docs/breaking-changes.md](docs/breaking-changes.md)。
+
 ## 目录结构
 
 ```text
@@ -22,10 +24,14 @@ payload/install.sh           # 设备安装脚本
 
 核心变量位于 `config/config.conf`：
 
+- `OPENWRT_SDK_URL`：OpenWrt SDK 地址
+- `OPENWRT_SOURCE_CDN_URL` / `OPENWRT_SOURCE_MIRROR_URL` / `GOPROXY`：可选下载加速参数
 - `PASSWALL_ALL_PACKAGES`：上游包全集（用于清单校验）
 - `PASSWALL_REQUIRED_PACKAGES`：必选编译组件（允许包含 OpenWrt feed/system 包）
 - `PASSWALL_OPTIONAL_SELECTED_PACKAGES`：已选可选组件（会编译）
 - `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES`：未选可选组件（默认不编译）
+
+说明：PassWall 上游仓库与 OpenWrt feed 源已在脚本内固定，不再作为配置项暴露。
 
 启用未选组件方法：把组件从 `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` 移到 `PASSWALL_OPTIONAL_SELECTED_PACKAGES`。
 
@@ -62,8 +68,7 @@ payload/install.sh           # 设备安装脚本
 
 ## 安装器模式
 
-- `auto`：优先 `INSTALL_WHITELIST`，否则回退 `TOPLEVEL_PACKAGES`
-- `top-level`：只安装顶层包
+- `auto`：等价于 `whitelist`
 - `whitelist`：安装白名单
 - `full`：安装 payload 全部 APK
 
@@ -87,11 +92,24 @@ payload/
   install.sh
   apks/*.apk
   apks/packages.adb
-  metadata/TOPLEVEL_PACKAGES
   metadata/INSTALL_WHITELIST
   metadata/PAYLOAD_APK_MAP
   SHA256SUMS
 ```
+
+payload 组装流程（`scripts/full-build.sh`）分为以下阶段：
+
+- 构建本地 APK 索引（`make package/index` + 收集 `packages.adb`）
+- 生成请求根集合（本体 + 必选 + 已选可选 + `dnsmasq-full` 约束）
+- 联合本地/官方仓库做递归依赖解析
+- 对解析结果做本地优先规范化，生成 `INSTALL_WHITELIST`
+- 落盘 APK、生成 `PAYLOAD_APK_MAP`、`apks/packages.adb` 与 `SHA256SUMS`
+
+重构边界：
+
+- 本仓库允许破坏性演进，优先简化实现与维护成本
+- 安装器不再支持 `top-level` 模式
+- payload 元数据最小闭集为 `INSTALL_WHITELIST`、`PAYLOAD_APK_MAP`、`apks/packages.adb`、`SHA256SUMS`
 
 ## License
 

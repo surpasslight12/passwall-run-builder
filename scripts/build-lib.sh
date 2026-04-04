@@ -423,10 +423,6 @@ payload_metadata_dir_name() {
   printf '%s\n' "metadata"
 }
 
-payload_toplevel_packages_name() {
-  printf '%s\n' "$(payload_metadata_dir_name)/TOPLEVEL_PACKAGES"
-}
-
 payload_install_whitelist_name() {
   printf '%s\n' "$(payload_metadata_dir_name)/INSTALL_WHITELIST"
 }

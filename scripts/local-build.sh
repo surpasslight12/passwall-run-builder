@@ -76,8 +76,8 @@ prepare_workspace() {
 load_config() {
   step_start "Load local config"
   load_env_config "$CONFIG_FILE"
-  config_default "PASSWALL_UPSTREAM_OWNER" "Openwrt-Passwall"
-  config_default "PASSWALL_UPSTREAM_REPO" "openwrt-passwall"
+  PASSWALL_UPSTREAM_OWNER="Openwrt-Passwall"
+  PASSWALL_UPSTREAM_REPO="openwrt-passwall"
   config_default "PASSWALL_LUCI_REPO" "https://github.com/Openwrt-Passwall/openwrt-passwall"
   config_default "PASSWALL_PACKAGES_REPO" "https://github.com/Openwrt-Passwall/openwrt-passwall-packages"
   [[ "${OPENWRT_SDK_URL:-}" =~ ^https:// ]] || die "OPENWRT_SDK_URL must use https"
@@ -129,7 +129,6 @@ prepare_synthetic_payload() {
   printf 'synthetic-dnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/dnsmasq-full-1.0-r1.apk"
   printf 'synthetic-microsocks\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/microsocks-1.0.5-r1.apk"
   printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/example-dependency-1.0-r1.apk"
-  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\nhysteria\ndnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
   printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\nhysteria\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/$(payload_install_whitelist_name)"
   write_payload_package_manifest "$PAYLOAD_DIR" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
   printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/$(payload_repo_index_name)"

@@ -12,16 +12,15 @@ die()      { err "$@"; exit 1; }
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [--install-mode auto|top-level|whitelist|full] [--force-reinstall]
+Usage: ./install.sh [--install-mode auto|whitelist|full] [--force-reinstall]
 
 Options:
-  --install-mode MODE  auto (default), top-level, whitelist, or full
+  --install-mode MODE  auto (default), whitelist, or full
   --force-reinstall   Force reinstall payload package files (may overwrite newer installed versions)
   --help               Show this help
 
 Modes:
-  auto       Use INSTALL_WHITELIST when present, otherwise TOPLEVEL_PACKAGES
-  top-level  Install only TOPLEVEL_PACKAGES plus dnsmasq-full when present
+  auto       Use INSTALL_WHITELIST (same behavior as whitelist)
   whitelist  Install INSTALL_WHITELIST plus dnsmasq-full when present
   full       Install every package listed by PAYLOAD_APK_MAP
 USAGE
@@ -53,7 +52,6 @@ done
 PAYLOAD_APK_DIR="apks"
 PAYLOAD_META_DIR="metadata"
 PAYLOAD_MAP_FILE="$PAYLOAD_META_DIR/PAYLOAD_APK_MAP"
-TOPLEVEL_FILE="$PAYLOAD_META_DIR/TOPLEVEL_PACKAGES"
 WHITELIST_FILE="$PAYLOAD_META_DIR/INSTALL_WHITELIST"
 REPO_INDEX_FILE="$PAYLOAD_APK_DIR/packages.adb"
 
@@ -180,14 +178,8 @@ build_install_package_list() {
 
   case "$INSTALL_MODE" in
     auto)
-      if [ -s "$WHITELIST_FILE" ]; then
-        INSTALL_MODE_RESOLVED="whitelist"
-      else
-        INSTALL_MODE_RESOLVED="top-level"
-      fi
-      ;;
-    top-level)
-      INSTALL_MODE_RESOLVED="top-level"
+      [ -s "$WHITELIST_FILE" ] || die "INSTALL_WHITELIST not found for install mode auto"
+      INSTALL_MODE_RESOLVED="whitelist"
       ;;
     whitelist)
       [ -s "$WHITELIST_FILE" ] || die "INSTALL_WHITELIST not found for install mode whitelist"
@@ -197,15 +189,11 @@ build_install_package_list() {
       INSTALL_MODE_RESOLVED="full"
       ;;
     *)
-      die "Unknown install mode: $INSTALL_MODE"
+      die "Unknown install mode: $INSTALL_MODE (expected auto|whitelist|full)"
       ;;
   esac
 
   case "$INSTALL_MODE_RESOLVED" in
-    top-level)
-      INSTALL_PLAN_LABEL="top-level packages"
-      append_packages_from_file "$TOPLEVEL_FILE"
-      ;;
     whitelist)
       INSTALL_PLAN_LABEL="whitelisted packages"
       append_packages_from_file "$WHITELIST_FILE"
@@ -220,6 +208,15 @@ build_install_package_list() {
     set -- $INSTALL_PACKAGES
     append_install_pkg "dnsmasq-full" "$@"
   fi
+}
+
+package_list_contains() {
+  target_pkg="$1"
+  shift
+  for pkg_name in "$@"; do
+    [ "$pkg_name" = "$target_pkg" ] && return 0
+  done
+  return 1
 }
 
 queue_conflict_removal() {
@@ -277,15 +274,8 @@ trap cleanup EXIT HUP INT TERM
 printf 'file://%s/%s\n' "$PWD" "$REPO_INDEX_FILE" > "$REPO_FILE"
 
 CONFLICT_REMOVALS=""
-HAS_DNSMASQ_FULL=0
-for pkg_name in $INSTALL_PACKAGES; do
-  if [ "$pkg_name" = "dnsmasq-full" ]; then
-    HAS_DNSMASQ_FULL=1
-    break
-  fi
-done
-
-if [ "$HAS_DNSMASQ_FULL" -eq 1 ]; then
+set -- $INSTALL_PACKAGES
+if package_list_contains "dnsmasq-full" "$@"; then
   queue_conflict_removal "dnsmasq"
   queue_conflict_removal "dnsmasq-dhcpv6"
 fi

@@ -108,15 +108,15 @@ prepare_workspace() {
 load_config() {
   step_start "Load build config"
   load_env_config "$CONFIG_FILE"
-  config_default "PASSWALL_UPSTREAM_OWNER" "Openwrt-Passwall"
-  config_default "PASSWALL_UPSTREAM_REPO" "openwrt-passwall"
+  PASSWALL_UPSTREAM_OWNER="Openwrt-Passwall"
+  PASSWALL_UPSTREAM_REPO="openwrt-passwall"
   config_default "PASSWALL_LUCI_REPO" "https://github.com/Openwrt-Passwall/openwrt-passwall"
   config_default "PASSWALL_PACKAGES_REPO" "https://github.com/Openwrt-Passwall/openwrt-passwall-packages"
-  config_default "OPENWRT_BASE_FEED_REPO" "https://github.com/openwrt/openwrt.git"
-  config_default "OPENWRT_PACKAGES_FEED_REPO" "https://github.com/openwrt/packages.git"
-  config_default "OPENWRT_LUCI_FEED_REPO" "https://github.com/openwrt/luci.git"
-  config_default "OPENWRT_ROUTING_FEED_REPO" "https://github.com/openwrt/routing.git"
-  config_default "OPENWRT_TELEPHONY_FEED_REPO" "https://github.com/openwrt/telephony.git"
+  OPENWRT_BASE_FEED_REPO="https://github.com/openwrt/openwrt.git"
+  OPENWRT_PACKAGES_FEED_REPO="https://github.com/openwrt/packages.git"
+  OPENWRT_LUCI_FEED_REPO="https://github.com/openwrt/luci.git"
+  OPENWRT_ROUTING_FEED_REPO="https://github.com/openwrt/routing.git"
+  OPENWRT_TELEPHONY_FEED_REPO="https://github.com/openwrt/telephony.git"
   config_default "OPENWRT_SOURCE_CDN_URL" "https://sources.cdn.openwrt.org"
   config_default "OPENWRT_SOURCE_MIRROR_URL" "https://sources.openwrt.org"
   config_default "GOPROXY" "https://proxy.golang.org,https://goproxy.io,direct"
@@ -214,48 +214,192 @@ prepare_sdk_workspace() {
   step_end
 }
 
-prepare_full_sources() {
-  step_start "Prepare PassWall sources"
-  local luci_tag packages_tag packages_branch packages_ref_kind packages_commit
-
+reset_passwall_source_workspace() {
   mkdir -p "$FULL_SDK_DIR/package"
   rm -rf "$FULL_SDK_DIR/feeds/packages/net/"{xray-core,v2ray-geodata,sing-box,chinadns-ng,dns2socks,hysteria,ipt2socks,microsocks,naiveproxy,shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev,simple-obfs,tcping,trojan-plus,tuic-client,v2ray-plugin,xray-plugin,geoview,shadow-tls}
   rm -rf "$FULL_SDK_DIR/package/passwall-packages" "$FULL_SDK_DIR/package/passwall-luci"
+}
+
+prepare_passwall_packages_source() {
+  local packages_tag packages_branch packages_ref_kind packages_commit
 
   if [ -n "$PASSWALL_PACKAGES_DIR" ]; then
     log_info "Copying local passwall-packages tree from $PASSWALL_PACKAGES_DIR"
     copy_tree "$PASSWALL_PACKAGES_DIR" "$FULL_SDK_DIR/package/passwall-packages"
-  else
-    packages_tag=$(resolve_remote_tag "$PASSWALL_PACKAGES_REPO" "$RAW_TAG" "$PASSWALL_VERSION_TAG" "v$PASSWALL_VERSION_TAG" || true)
-    if [ -n "$packages_tag" ]; then
-      clone_git_ref "$PASSWALL_PACKAGES_REPO" "$packages_tag" "$FULL_SDK_DIR/package/passwall-packages"
-      packages_ref_kind="tag"
-    else
-      packages_branch=$(resolve_remote_default_branch "$PASSWALL_PACKAGES_REPO")
-      [ -n "$packages_branch" ] || die "Cannot resolve default branch for packages repo: $PASSWALL_PACKAGES_REPO"
-      log_warn "No matching packages tag found; falling back to default branch $packages_branch"
-      clone_git_ref "$PASSWALL_PACKAGES_REPO" "$packages_branch" "$FULL_SDK_DIR/package/passwall-packages"
-      packages_tag="$packages_branch"
-      packages_ref_kind="branch"
-    fi
-    packages_commit=$(git -C "$FULL_SDK_DIR/package/passwall-packages" rev-parse --short HEAD)
-    log_info "Prepared passwall-packages from ${packages_ref_kind}: ${packages_tag} (${packages_commit})"
-    gh_summary "- PassWall packages source ${packages_ref_kind}: \`${packages_tag}\`"
-    gh_summary "- PassWall packages source commit: \`${packages_commit}\`"
+    return 0
   fi
+
+  packages_tag=$(resolve_remote_tag "$PASSWALL_PACKAGES_REPO" "$RAW_TAG" "$PASSWALL_VERSION_TAG" "v$PASSWALL_VERSION_TAG" || true)
+  if [ -n "$packages_tag" ]; then
+    clone_git_ref "$PASSWALL_PACKAGES_REPO" "$packages_tag" "$FULL_SDK_DIR/package/passwall-packages"
+    packages_ref_kind="tag"
+  else
+    packages_branch=$(resolve_remote_default_branch "$PASSWALL_PACKAGES_REPO")
+    [ -n "$packages_branch" ] || die "Cannot resolve default branch for packages repo: $PASSWALL_PACKAGES_REPO"
+    log_warn "No matching packages tag found; falling back to default branch $packages_branch"
+    clone_git_ref "$PASSWALL_PACKAGES_REPO" "$packages_branch" "$FULL_SDK_DIR/package/passwall-packages"
+    packages_tag="$packages_branch"
+    packages_ref_kind="branch"
+  fi
+
+  packages_commit=$(git -C "$FULL_SDK_DIR/package/passwall-packages" rev-parse --short HEAD)
+  log_info "Prepared passwall-packages from ${packages_ref_kind}: ${packages_tag} (${packages_commit})"
+  gh_summary "- PassWall packages source ${packages_ref_kind}: \`${packages_tag}\`"
+  gh_summary "- PassWall packages source commit: \`${packages_commit}\`"
+}
+
+prepare_passwall_luci_source() {
+  local luci_tag
 
   if [ -n "$PASSWALL_LUCI_DIR" ]; then
     log_info "Copying local passwall-luci tree from $PASSWALL_LUCI_DIR"
     copy_tree "$PASSWALL_LUCI_DIR" "$FULL_SDK_DIR/package/passwall-luci"
-  else
-    luci_tag=$(resolve_remote_tag "$PASSWALL_LUCI_REPO" "$RAW_TAG" "$PASSWALL_VERSION_TAG" "v$PASSWALL_VERSION_TAG") \
-      || die "Cannot resolve passwall-luci tag for full build"
-    clone_git_ref "$PASSWALL_LUCI_REPO" "$luci_tag" "$FULL_SDK_DIR/package/passwall-luci"
-    gh_summary "- PassWall luci source tag: \`${luci_tag}\`"
+    return 0
   fi
 
+  luci_tag=$(resolve_remote_tag "$PASSWALL_LUCI_REPO" "$RAW_TAG" "$PASSWALL_VERSION_TAG" "v$PASSWALL_VERSION_TAG") \
+    || die "Cannot resolve passwall-luci tag for full build"
+  clone_git_ref "$PASSWALL_LUCI_REPO" "$luci_tag" "$FULL_SDK_DIR/package/passwall-luci"
+  gh_summary "- PassWall luci source tag: \`${luci_tag}\`"
+}
+
+verify_passwall_luci_source() {
   [ -f "$FULL_SDK_DIR/package/passwall-luci/luci-app-passwall/Makefile" ] || die "PassWall luci Makefile missing"
+}
+
+prepare_full_sources() {
+  step_start "Prepare PassWall sources"
+
+  reset_passwall_source_workspace
+  prepare_passwall_packages_source
+  prepare_passwall_luci_source
+  verify_passwall_luci_source
+
   step_end
+}
+
+initialize_feeds_conf() {
+  if [ -f feeds.conf.default ]; then
+    cp feeds.conf.default feeds.conf
+  else
+    cat > feeds.conf <<EOF
+src-git packages ${OPENWRT_PACKAGES_FEED_REPO}
+src-git luci ${OPENWRT_LUCI_FEED_REPO}
+EOF
+  fi
+}
+
+override_feed_repositories() {
+  local base_feed_repo packages_feed_repo luci_feed_repo routing_feed_repo telephony_feed_repo
+
+  base_feed_repo=$(sed_escape_replacement "$OPENWRT_BASE_FEED_REPO")
+  packages_feed_repo=$(sed_escape_replacement "$OPENWRT_PACKAGES_FEED_REPO")
+  luci_feed_repo=$(sed_escape_replacement "$OPENWRT_LUCI_FEED_REPO")
+  routing_feed_repo=$(sed_escape_replacement "$OPENWRT_ROUTING_FEED_REPO")
+  telephony_feed_repo=$(sed_escape_replacement "$OPENWRT_TELEPHONY_FEED_REPO")
+  sed -i \
+    -e "s|https://git.openwrt.org/openwrt/openwrt.git|${base_feed_repo}|g" \
+    -e "s|https://git.openwrt.org/feed/packages.git|${packages_feed_repo}|g" \
+    -e "s|https://git.openwrt.org/project/luci.git|${luci_feed_repo}|g" \
+    -e "s|https://git.openwrt.org/feed/routing.git|${routing_feed_repo}|g" \
+    -e "s|https://git.openwrt.org/feed/telephony.git|${telephony_feed_repo}|g" \
+    feeds.conf
+}
+
+patch_golang_gotoolchain() {
+  [ -d feeds/packages/lang/golang ] || return 0
+
+  find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) \
+    -exec grep -l 'GOTOOLCHAIN=local' {} \; \
+    -exec sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} \;
+  log_info "Patched GOTOOLCHAIN"
+}
+
+patch_curl_ldap_dependency() {
+  local curl_mk="feeds/packages/net/curl/Makefile"
+
+  if [ -f "$curl_mk" ] && grep -q "LIBCURL_LDAP:libopenldap" "$curl_mk"; then
+    sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$curl_mk"
+    log_info "Patched curl LDAP"
+  fi
+}
+
+patch_rust_download_ci_llvm() {
+  local rust_mk="feeds/packages/lang/rust/Makefile"
+
+  if [ -f "$rust_mk" ] && grep -qE 'download-ci-llvm=(true|if-unchanged)' "$rust_mk"; then
+    sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$rust_mk"
+    log_info "Patched Rust download-ci-llvm"
+  fi
+}
+
+patch_golang_host_bootstrap() {
+  local compiler_mk gl_version sys_go_bin sys_go_ver sys_goroot host_lib go126_build gcc_helper
+
+  compiler_mk="feeds/packages/lang/golang/golang-compiler.mk"
+  [ -d "feeds/packages/lang/golang/golang1.26" ] || return 0
+  [ -f "$compiler_mk" ] || return 0
+
+  if grep -q '\$(error go-' "$compiler_mk"; then
+    sed -i 's/$(error go-/$(warning go-/g' "$compiler_mk"
+    log_info "Patched golang-compiler.mk: CheckHost error -> warning"
+  fi
+
+  gl_version="feeds/packages/lang/golang/golang-version.mk"
+  if [ -f "$gl_version" ] && ! grep -qF 'TITLE:=Go programming language' "$gl_version"; then
+    awk '/^define Package\/\$\(PKG_NAME\)\/Default/ { print; print "  TITLE:=Go programming language"; next } { print }' \
+      "$gl_version" > /tmp/gv-patched.mk && mv /tmp/gv-patched.mk "$gl_version"
+    log_info "Patched golang-version.mk: added TITLE to Package/Default"
+  fi
+
+  sys_go_bin=$(command -v go 2>/dev/null || true)
+  [ -n "$sys_go_bin" ] || return 0
+  sys_go_ver=$("$sys_go_bin" version 2>/dev/null | awk '{print $3}')
+
+  case "$sys_go_ver" in
+    go1.26*)
+      sys_goroot=$("$sys_go_bin" env GOROOT 2>/dev/null || true)
+      host_lib="staging_dir/host/lib/go-1.26"
+      go126_build="build_dir/hostpkg/go-1.26.0"
+      if [ -n "$sys_goroot" ] && [ -d "$sys_goroot" ]; then
+        if [ ! -f "$host_lib/bin/go" ]; then
+          log_info "Pre-installing golang1.26 from system $sys_go_ver"
+          mkdir -p "$host_lib"
+          cp -a "$sys_goroot/." "$host_lib/"
+          rm -rf "$host_lib/pkg/linux_amd64" 2>/dev/null || true
+          gcc_helper="feeds/packages/lang/golang/go-gcc-helper"
+          if [ -f "$gcc_helper" ]; then
+            mkdir -p "$host_lib/openwrt"
+            install -m 755 "$gcc_helper" "$host_lib/openwrt/"
+            [ -L "$host_lib/openwrt/gcc" ] || ln -sf "go-gcc-helper" "$host_lib/openwrt/gcc"
+            [ -L "$host_lib/openwrt/g++" ] || ln -sf "go-gcc-helper" "$host_lib/openwrt/g++"
+          fi
+          mkdir -p "staging_dir/host/bin"
+          [ -L "staging_dir/host/bin/go1.26" ] || ln -sf "../lib/go-1.26/bin/go" "staging_dir/host/bin/go1.26"
+          [ -L "staging_dir/host/bin/gofmt1.26" ] || ln -sf "../lib/go-1.26/bin/gofmt" "staging_dir/host/bin/gofmt1.26"
+        fi
+        mkdir -p "$go126_build" "staging_dir/host/stamp"
+        for s in .configured .built .installed .stamp_configured .stamp_built .stamp_installed; do
+          touch "$go126_build/$s"
+        done
+        touch "staging_dir/host/stamp/.golang1.26_installed"
+      fi
+      ;;
+  esac
+}
+
+install_required_feeds() {
+  ./scripts/feeds install \
+    libev libmbedtls libsodium libopenssl libpcre2 libudns \
+    boost boost-program_options boost-system \
+    ca-bundle c-ares pcre2 zlib libubox libubus \
+    rpcd rpcd-mod-file rpcd-mod-ucode ucode ucode-mod-fs ucode-mod-uci \
+    ucode-mod-ubus ucode-mod-math libucode \
+    coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
+    libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
+    iwinfo openssl libnl-tiny golang rust \
+    || log_warn "Some feed packages unavailable"
+  ./scripts/feeds install luci-base || log_warn "luci-base install had issues"
 }
 
 configure_local_feeds() {
@@ -265,108 +409,15 @@ configure_local_feeds() {
   (
     cd "$FULL_SDK_DIR"
 
-    if [ -f feeds.conf.default ]; then
-      cp feeds.conf.default feeds.conf
-    else
-      cat > feeds.conf <<EOF
-src-git packages ${OPENWRT_PACKAGES_FEED_REPO}
-src-git luci ${OPENWRT_LUCI_FEED_REPO}
-EOF
-    fi
-
-    base_feed_repo=$(sed_escape_replacement "$OPENWRT_BASE_FEED_REPO")
-    packages_feed_repo=$(sed_escape_replacement "$OPENWRT_PACKAGES_FEED_REPO")
-    luci_feed_repo=$(sed_escape_replacement "$OPENWRT_LUCI_FEED_REPO")
-    routing_feed_repo=$(sed_escape_replacement "$OPENWRT_ROUTING_FEED_REPO")
-    telephony_feed_repo=$(sed_escape_replacement "$OPENWRT_TELEPHONY_FEED_REPO")
-    sed -i \
-      -e "s|https://git.openwrt.org/openwrt/openwrt.git|${base_feed_repo}|g" \
-      -e "s|https://git.openwrt.org/feed/packages.git|${packages_feed_repo}|g" \
-      -e "s|https://git.openwrt.org/project/luci.git|${luci_feed_repo}|g" \
-      -e "s|https://git.openwrt.org/feed/routing.git|${routing_feed_repo}|g" \
-      -e "s|https://git.openwrt.org/feed/telephony.git|${telephony_feed_repo}|g" \
-      feeds.conf
-
+    initialize_feeds_conf
+    override_feed_repositories
     retry 3 30 ./scripts/feeds update -a || die "Feeds update failed"
 
-    if [ -d feeds/packages/lang/golang ]; then
-      find feeds/packages/lang/golang -type f \( -name "*.mk" -o -name "Makefile" \) \
-        -exec grep -l 'GOTOOLCHAIN=local' {} \; \
-        -exec sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} \;
-      log_info "Patched GOTOOLCHAIN"
-    fi
-
-    CURL_MK="feeds/packages/net/curl/Makefile"
-    if [ -f "$CURL_MK" ] && grep -q "LIBCURL_LDAP:libopenldap" "$CURL_MK"; then
-      sed -i 's/[[:space:]]*+LIBCURL_LDAP:libopenldap[[:space:]]*//g' "$CURL_MK"
-      log_info "Patched curl LDAP"
-    fi
-
-    RUST_MK="feeds/packages/lang/rust/Makefile"
-    if [ -f "$RUST_MK" ] && grep -qE 'download-ci-llvm=(true|if-unchanged)' "$RUST_MK"; then
-      sed -i -E 's/download-ci-llvm=(true|if-unchanged)/download-ci-llvm=false/g' "$RUST_MK"
-      log_info "Patched Rust download-ci-llvm"
-    fi
-
-    COMPILER_MK="feeds/packages/lang/golang/golang-compiler.mk"
-    if [ -d "feeds/packages/lang/golang/golang1.26" ] && [ -f "$COMPILER_MK" ]; then
-      if grep -q '$(error go-' "$COMPILER_MK"; then
-        sed -i 's/$(error go-/$(warning go-/g' "$COMPILER_MK"
-        log_info "Patched golang-compiler.mk: CheckHost error -> warning"
-      fi
-      GL_VERSION="feeds/packages/lang/golang/golang-version.mk"
-      if [ -f "$GL_VERSION" ] && ! grep -qF 'TITLE:=Go programming language' "$GL_VERSION"; then
-        awk '/^define Package\/\$\(PKG_NAME\)\/Default/ { print; print "  TITLE:=Go programming language"; next } { print }' \
-          "$GL_VERSION" > /tmp/gv-patched.mk && mv /tmp/gv-patched.mk "$GL_VERSION"
-        log_info "Patched golang-version.mk: added TITLE to Package/Default"
-      fi
-      SYS_GO_BIN=$(command -v go 2>/dev/null || true)
-      if [ -n "$SYS_GO_BIN" ]; then
-        SYS_GO_VER=$("$SYS_GO_BIN" version 2>/dev/null | awk '{print $3}')
-        case "$SYS_GO_VER" in
-          go1.26*)
-            SYS_GOROOT=$("$SYS_GO_BIN" env GOROOT 2>/dev/null || true)
-            HOST_LIB="staging_dir/host/lib/go-1.26"
-            GO126_BUILD="build_dir/hostpkg/go-1.26.0"
-            if [ -n "$SYS_GOROOT" ] && [ -d "$SYS_GOROOT" ]; then
-              if [ ! -f "$HOST_LIB/bin/go" ]; then
-                log_info "Pre-installing golang1.26 from system $SYS_GO_VER"
-                mkdir -p "$HOST_LIB"
-                cp -a "$SYS_GOROOT/." "$HOST_LIB/"
-                rm -rf "$HOST_LIB/pkg/linux_amd64" 2>/dev/null || true
-                GCC_HELPER="feeds/packages/lang/golang/go-gcc-helper"
-                if [ -f "$GCC_HELPER" ]; then
-                  mkdir -p "$HOST_LIB/openwrt"
-                  install -m 755 "$GCC_HELPER" "$HOST_LIB/openwrt/"
-                  [ -L "$HOST_LIB/openwrt/gcc" ] || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/gcc"
-                  [ -L "$HOST_LIB/openwrt/g++" ] || ln -sf "go-gcc-helper" "$HOST_LIB/openwrt/g++"
-                fi
-                mkdir -p "staging_dir/host/bin"
-                [ -L "staging_dir/host/bin/go1.26" ] || ln -sf "../lib/go-1.26/bin/go" "staging_dir/host/bin/go1.26"
-                [ -L "staging_dir/host/bin/gofmt1.26" ] || ln -sf "../lib/go-1.26/bin/gofmt" "staging_dir/host/bin/gofmt1.26"
-              fi
-              mkdir -p "$GO126_BUILD" "staging_dir/host/stamp"
-              for s in .configured .built .installed .stamp_configured .stamp_built .stamp_installed; do
-                touch "$GO126_BUILD/$s"
-              done
-              touch "staging_dir/host/stamp/.golang1.26_installed"
-            fi
-            ;;
-        esac
-      fi
-    fi
-
-    ./scripts/feeds install \
-      libev libmbedtls libsodium libopenssl libpcre2 libudns \
-      boost boost-program_options boost-system \
-      ca-bundle c-ares pcre2 zlib libubox libubus \
-      rpcd rpcd-mod-file rpcd-mod-ucode ucode ucode-mod-fs ucode-mod-uci \
-      ucode-mod-ubus ucode-mod-math libucode \
-      coreutils coreutils-base64 coreutils-nohup curl dnsmasq-full ip-full \
-      libuci-lua luci-compat luci-lib-jsonc resolveip luci-lua-runtime \
-      iwinfo openssl libnl-tiny golang rust \
-      || log_warn "Some feed packages unavailable"
-    ./scripts/feeds install luci-base || log_warn "luci-base install had issues"
+    patch_golang_gotoolchain
+    patch_curl_ldap_dependency
+    patch_rust_download_ci_llvm
+    patch_golang_host_bootstrap
+    install_required_feeds
   )
 
   step_end
@@ -466,58 +517,50 @@ resolve_remote_kmods_repo() {
   printf '%s/targets/%s/kmods/%s/packages.adb\n' "${dist_root%/}" "$target_path" "$kmods_dir"
 }
 
-compile_full_sources() {
-  step_start "Compile package sources"
-  local passwall_roots_file total_ok total_fail failed_list timings_file
-  passwall_roots_file="$FULL_SDK_DIR/.passwall-package-roots"
+resolve_compile_source_dirs() {
+  local passwall_roots_file="$1" output_file="$2"
+  local pkg src_dir
+  declare -A local_source_pkgs=()
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    src_dir=$(map_passwall_source_dir "$pkg" || true)
+    [ -n "$src_dir" ] || continue
+    local_source_pkgs["$src_dir"]+=" $pkg"
+  done < "$passwall_roots_file"
+  local_source_pkgs["package/passwall-luci/luci-app-passwall"]+=" luci-app-passwall luci-i18n-passwall-zh-cn"
+
+  printf '%s\n' "${!local_source_pkgs[@]}" | LC_ALL=C sort > "$output_file"
+  [ -s "$output_file" ] || die "No package source directories resolved from $passwall_roots_file"
+}
+
+run_compile_source_dirs() {
+  local source_list_file="$1" timings_file="$2" results_file="$3"
+  local total_ok total_fail failed_list src_dir label pkg_t0
+
   total_ok=0
   total_fail=0
   failed_list=""
-  timings_file="$WORKDIR/pkg-timings.txt"
-  : > "$timings_file"
 
-  ensure_rust_target "$passwall_roots_file"
+  while IFS= read -r src_dir; do
+    [ -n "$src_dir" ] || continue
+    label=$(basename "$src_dir")
+    pkg_t0=$(date +%s)
+    if make_pkg "$src_dir/compile" "$label"; then
+      total_ok=$((total_ok + 1))
+      printf '%s|ok|%ss\n' "$label" "$(( $(date +%s) - pkg_t0 ))" >> "$timings_file"
+    else
+      total_fail=$((total_fail + 1))
+      failed_list="$failed_list $label"
+      printf '%s|failed|%ss\n' "$label" "$(( $(date +%s) - pkg_t0 ))" >> "$timings_file"
+    fi
+  done < "$source_list_file"
 
-  (
-    cd "$FULL_SDK_DIR"
-    export FORCE_UNSAFE_CONFIGURE=1
-    export CARGO_INCREMENTAL=0
-    export CARGO_NET_GIT_FETCH_WITH_CLI=true
-    export GOPROXY
-    unset CI GITHUB_ACTIONS || true
+  printf '%s\n%s\n%s\n' "$total_ok" "$total_fail" "$failed_list" > "$results_file"
+}
 
-    declare -A local_source_pkgs=()
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      src_dir=$(map_passwall_source_dir "$pkg" || true)
-      [ -n "$src_dir" ] || continue
-      local_source_pkgs["$src_dir"]+=" $pkg"
-    done < "$passwall_roots_file"
-    local_source_pkgs["package/passwall-luci/luci-app-passwall"]+=" luci-app-passwall luci-i18n-passwall-zh-cn"
-
-    check_disk_space 10
-    while IFS= read -r src_dir; do
-      [ -n "$src_dir" ] || continue
-      label=$(basename "$src_dir")
-      pkg_t0=$(date +%s)
-      if make_pkg "$src_dir/compile" "$label"; then
-        total_ok=$((total_ok + 1))
-        printf '%s|ok|%ss\n' "$label" "$(( $(date +%s) - pkg_t0 ))" >> "$timings_file"
-      else
-        total_fail=$((total_fail + 1))
-        failed_list="$failed_list $label"
-        printf '%s|failed|%ss\n' "$label" "$(( $(date +%s) - pkg_t0 ))" >> "$timings_file"
-      fi
-    done < <(printf '%s\n' "${!local_source_pkgs[@]}" | LC_ALL=C sort)
-
-    printf '%s\n%s\n%s\n' "$total_ok" "$total_fail" "$failed_list" > "$WORKDIR/full-build-results"
-  )
-
-  total_ok=$(sed -n '1p' "$WORKDIR/full-build-results")
-  total_fail=$(sed -n '2p' "$WORKDIR/full-build-results")
-  failed_list=$(sed -n '3p' "$WORKDIR/full-build-results")
-  [ "$total_ok" -gt 0 ] || die "No package source built in full mode"
-  [ "$total_fail" -eq 0 ] || die "Full mode build failed for:${failed_list}"
+emit_compile_summary() {
+  local total_ok="$1" total_fail="$2" timings_file="$3"
 
   {
     summary="## Build Summary"$'\n'
@@ -534,6 +577,39 @@ compile_full_sources() {
     fi
     gh_summary "$summary"
   }
+}
+
+compile_full_sources() {
+  step_start "Compile package sources"
+  local passwall_roots_file total_ok total_fail failed_list timings_file source_list_file results_file
+  passwall_roots_file="$FULL_SDK_DIR/.passwall-package-roots"
+  timings_file="$WORKDIR/pkg-timings.txt"
+  source_list_file="$WORKDIR/compile-sources.txt"
+  results_file="$WORKDIR/compile-results.txt"
+  : > "$timings_file"
+
+  ensure_rust_target "$passwall_roots_file"
+
+  (
+    cd "$FULL_SDK_DIR"
+    export FORCE_UNSAFE_CONFIGURE=1
+    export CARGO_INCREMENTAL=0
+    export CARGO_NET_GIT_FETCH_WITH_CLI=true
+    export GOPROXY
+    unset CI GITHUB_ACTIONS || true
+
+    check_disk_space 10
+    resolve_compile_source_dirs "$passwall_roots_file" "$source_list_file"
+    run_compile_source_dirs "$source_list_file" "$timings_file" "$results_file"
+  )
+
+  total_ok=$(sed -n '1p' "$results_file")
+  total_fail=$(sed -n '2p' "$results_file")
+  failed_list=$(sed -n '3p' "$results_file")
+  [ "$total_ok" -gt 0 ] || die "No package source built in full mode"
+  [ "$total_fail" -eq 0 ] || die "Full mode build failed for:${failed_list}"
+
+  emit_compile_summary "$total_ok" "$total_fail" "$timings_file"
 
   log_info "Full mode compiled $total_ok package source(s)"
   step_end
@@ -550,7 +626,7 @@ reset_payload_dir() {
     "$payload_dir/$(payload_apk_dir_name)" \
     "$payload_dir/$(payload_metadata_dir_name)"
   find "$payload_dir" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' -o -name 'PAYLOAD_APK_MAP' \) \
+    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'INSTALL_WHITELIST' -o -name 'PAYLOAD_APK_MAP' \) \
     -delete 2>/dev/null || true
   if [ "$(realpath "$REPO_ROOT/payload/install.sh")" != "$(realpath -m "$payload_dir/install.sh")" ]; then
     cp "$REPO_ROOT/payload/install.sh" "$payload_dir/install.sh"
@@ -582,10 +658,235 @@ emit_payload_dependency_summary() {
     "$official_fallback_count")"
 }
 
+collect_payload_build_local_repository() {
+  local mkndx_log="/tmp/package-index-$$.log"
+  find "$local_repo_root" -type f -name 'packages.adb' -delete 2>/dev/null || true
+  if make package/index V=s >"$mkndx_log" 2>&1; then
+    :
+  else
+    tail -60 "$mkndx_log" || true
+    rm -f "$mkndx_log"
+    die "Failed to generate local APK repository indexes"
+  fi
+  rm -f "$mkndx_log"
+
+  mapfile -t LOCAL_REPO_INDEXES < <(
+    {
+      find "$local_repo_root" -type f -name 'packages.adb'
+      if [ -d "$local_target_repo_root" ]; then
+        find "$local_target_repo_root" -type f -path '*/packages/packages.adb'
+      fi
+    } | LC_ALL=C sort -u
+  )
+  [ "${#LOCAL_REPO_INDEXES[@]}" -gt 0 ] || die "No local packages.adb indexes found under $local_repo_root or $local_target_repo_root"
+  printf 'file://%s\n' "${LOCAL_REPO_INDEXES[@]}" > "$local_repo_index_list"
+}
+
+collect_payload_make_combined_repositories() {
+  local repo_file="$1" dist_root target_path kmods_repo
+  dist_root="${OPENWRT_SDK_URL%%/targets/*}"
+  target_path=$(printf '%s' "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p')
+  [ -n "$dist_root" ] || die "Cannot derive OpenWrt dist root from SDK URL"
+  [ -n "$target_path" ] || die "Cannot derive target path from SDK URL"
+  cat "$local_repo_index_list" > "$repo_file"
+  kmods_repo=$(resolve_remote_kmods_repo "$dist_root" "$target_path" || true)
+  cat >> "$repo_file" <<EOF
+$dist_root/targets/$target_path/packages/packages.adb
+$dist_root/packages/$arch_packages/base/packages.adb
+$dist_root/packages/$arch_packages/packages/packages.adb
+$dist_root/packages/$arch_packages/luci/packages.adb
+$dist_root/packages/$arch_packages/routing/packages.adb
+$dist_root/packages/$arch_packages/telephony/packages.adb
+EOF
+  if [ -n "$kmods_repo" ]; then
+    printf '%s\n' "$kmods_repo" >> "$repo_file"
+  else
+    log_warn "Unable to resolve remote kmods repository under targets/$target_path/kmods/"
+  fi
+}
+
+collect_payload_fetch_resolved_packages() {
+  local repo_file="$1" dest_dir="$2"
+  shift 2
+  [ "$#" -gt 0 ] || return 0
+  rm -rf "$dest_dir"
+  mkdir -p "$dest_dir"
+  "$apk_tool" \
+    --allow-untrusted \
+    --force-refresh \
+    --no-interactive \
+    --no-cache \
+    --arch "$arch_packages" \
+    --repositories-file "$repo_file" \
+    fetch --recursive --output "$dest_dir" "$@"
+}
+
+collect_payload_register_canonical_apk() {
+  local apk_file="$1" apk_source="$2"
+  local pkg_name current_file current_source preferred_file target_file
+
+  pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+  [ -n "$pkg_name" ] || return 0
+
+  current_file="${selected_apks[$pkg_name]:-}"
+  current_source="${selected_apk_source[$pkg_name]:-}"
+  if [ -n "$current_file" ]; then
+    if [ "$current_source" != "$apk_source" ]; then
+      [ "$apk_source" = "local" ] || return 0
+      preferred_file="$apk_file"
+    else
+      preferred_file=$(prefer_newer_file_by_basename "$current_file" "$apk_file")
+      [ "$preferred_file" = "$apk_file" ] || return 0
+    fi
+    rm -f "$current_file"
+  fi
+
+  target_file="$canonical_fetch_dir/$(basename "$apk_file")"
+  cp -f "$apk_file" "$target_file"
+  selected_apks["$pkg_name"]="$target_file"
+  selected_apk_source["$pkg_name"]="$apk_source"
+}
+
+collect_payload_canonicalize_resolved_packages() {
+  local apk_file pkg_name local_pkg_file
+  declare -A fetched_pkg_set=()
+
+  rm -rf "$canonical_fetch_dir"
+  mkdir -p "$canonical_fetch_dir"
+
+  selected_apks=()
+  selected_apk_source=()
+
+  while IFS= read -r -d '' apk_file; do
+    pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+    [ -n "$pkg_name" ] || continue
+    fetched_pkg_set["$pkg_name"]=1
+    collect_payload_register_canonical_apk "$apk_file" "fetched"
+  done < <(find "$fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+
+  while IFS= read -r pkg_name; do
+    [ -n "$pkg_name" ] || continue
+    local_pkg_file=$(find_payload_pkg_file "$local_repo_search_root" "$pkg_name" || true)
+    [ -n "$local_pkg_file" ] || continue
+    collect_payload_register_canonical_apk "$local_pkg_file" "local"
+  done < <(printf '%s\n' "${!fetched_pkg_set[@]}" | LC_ALL=C sort)
+}
+
+collect_payload_prepare_requested_specs() {
+  local passwall_roots_file="$1" local_repo_search_root="$2"
+  local requested_specs_file="$3"
+  local pkg pkg_spec
+
+  # Stage output:
+  # - REQUESTED_SPECS: dependency resolution roots/specs
+  # - toplevel_pkgs: installer top-level package set
+  # - missing_pkgs/official_fetch_pkgs: summary and fail-fast checks
+  REQUESTED_SPECS=()
+  root_count=0
+
+  toplevel_pkgs["luci-app-passwall"]=1
+  luci_spec=$(local_pkg_spec "$local_repo_search_root" "luci-app-passwall" || true)
+  [ -n "$luci_spec" ] || die "luci-app-passwall APK not found in local repository"
+  REQUESTED_SPECS+=("$luci_spec")
+  # Prefer dnsmasq-full as the provider for PassWall's virtual dnsmasq dependency
+  # so apk does not resolve it to the conflicting minimal dnsmasq package.
+  REQUESTED_SPECS+=("dnsmasq-full")
+
+  zh_spec=$(local_pkg_spec "$local_repo_search_root" "luci-i18n-passwall-zh-cn" || true)
+  if [ -n "$zh_spec" ]; then
+    toplevel_pkgs["luci-i18n-passwall-zh-cn"]=1
+    REQUESTED_SPECS+=("$zh_spec")
+  fi
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    root_count=$((root_count + 1))
+    toplevel_pkgs["$pkg"]=1
+    pkg_spec=$(local_pkg_spec "$local_repo_search_root" "$pkg" || true)
+    if [ -n "$pkg_spec" ]; then
+      REQUESTED_SPECS+=("$pkg_spec")
+    else
+      REQUESTED_SPECS+=("$pkg")
+      if map_passwall_source_dir "$pkg" >/dev/null 2>&1; then
+        missing_pkgs["$pkg"]=1
+      else
+        official_fetch_pkgs["$pkg"]=1
+      fi
+    fi
+  done < "$passwall_roots_file"
+
+  printf '%s\n' "${REQUESTED_SPECS[@]}" | sed '/^$/d' | LC_ALL=C sort -u > "$requested_specs_file"
+  mapfile -t REQUESTED_SPECS < "$requested_specs_file"
+}
+
+collect_payload_build_install_whitelist() {
+  local passwall_roots_file="$1" canonical_fetch_dir="$2" install_whitelist_file="$3"
+  local pkg apk_file pkg_name
+
+  # Whitelist includes compile roots and any resolved PassWall-related runtime packages.
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    install_whitelist_pkgs["$pkg"]=1
+  done < "$passwall_roots_file"
+  install_whitelist_pkgs["luci-app-passwall"]=1
+  [ -n "${zh_spec:-}" ] && install_whitelist_pkgs["luci-i18n-passwall-zh-cn"]=1
+
+  while IFS= read -r -d '' apk_file; do
+    pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+    [ -n "$pkg_name" ] || continue
+    if map_passwall_source_dir "$pkg_name" >/dev/null 2>&1; then
+      install_whitelist_pkgs["$pkg_name"]=1
+    fi
+  done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+
+  if find_payload_pkg_file "$canonical_fetch_dir" "dnsmasq-full" >/dev/null 2>&1; then
+    install_whitelist_pkgs["dnsmasq-full"]=1
+  fi
+
+  printf '%s\n' "${!install_whitelist_pkgs[@]}" | LC_ALL=C sort > "$install_whitelist_file"
+  [ -s "$install_whitelist_file" ] || die "Installer whitelist is empty"
+}
+
+collect_payload_verify_toplevel_presence() {
+  local canonical_fetch_dir="$1"
+  local pkg pkg_file
+
+  for pkg in "${!toplevel_pkgs[@]}"; do
+    pkg_file=$(find_payload_pkg_file "$canonical_fetch_dir" "$pkg" || true)
+    if [ -z "$pkg_file" ] && [ "$pkg" != "luci-i18n-passwall-zh-cn" ]; then
+      die "Top-level package missing after dependency resolution: $pkg"
+    fi
+  done
+}
+
+collect_payload_copy_canonical_apks() {
+  local canonical_fetch_dir="$1" payload_dir="$2"
+  local apk_file
+
+  while IFS= read -r -d '' apk_file; do
+    cp "$apk_file" "$payload_dir/$(payload_apk_dir_name)/"
+  done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+}
+
+collect_payload_count_dependency_apks() {
+  local payload_apk_dir="$1"
+  local dep_count apk_file pkg_name
+
+  dep_count=0
+  while IFS= read -r -d '' apk_file; do
+    pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+    [ -n "$pkg_name" ] || continue
+    [ -n "${toplevel_pkgs[$pkg_name]+x}" ] && continue
+    dep_count=$((dep_count + 1))
+  done < <(find "$payload_apk_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+
+  printf '%s\n' "$dep_count"
+}
+
 collect_full_payload() {
   step_start "Collect payload"
   local local_repo_root local_target_repo_root local_repo_search_root
-  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir canonical_fetch_dir combined_repo_file requested_specs_file toplevel_packages_file install_whitelist_file
+  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir canonical_fetch_dir combined_repo_file requested_specs_file install_whitelist_file
   local_repo_root="$FULL_SDK_DIR/bin/packages"
   local_target_repo_root="$FULL_SDK_DIR/bin/targets"
   local_repo_search_root="$FULL_SDK_DIR/bin"
@@ -597,7 +898,6 @@ collect_full_payload() {
   canonical_fetch_dir="$FULL_SDK_DIR/.resolved-apks-canonical"
   combined_repo_file="$FULL_SDK_DIR/.combined-repositories"
   requested_specs_file="$WORKDIR/requested-specs.txt"
-  toplevel_packages_file="$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
   install_whitelist_file="$PAYLOAD_DIR/$(payload_install_whitelist_name)"
 
   reset_payload_dir "$PAYLOAD_DIR"
@@ -612,204 +912,32 @@ collect_full_payload() {
     declare -A toplevel_pkgs=() missing_pkgs=() official_fetch_pkgs=() selected_apks=() selected_apk_source=() install_whitelist_pkgs=()
     REQUESTED_SPECS=()
 
-    build_local_repository() {
-      local mkndx_log="/tmp/package-index-$$.log"
-      find "$local_repo_root" -type f -name 'packages.adb' -delete 2>/dev/null || true
-      if make package/index V=s >"$mkndx_log" 2>&1; then
-        :
-      else
-        tail -60 "$mkndx_log" || true
-        rm -f "$mkndx_log"
-        die "Failed to generate local APK repository indexes"
-      fi
-      rm -f "$mkndx_log"
+    # Stage 1: build local index and requested root specs.
+    collect_payload_build_local_repository
+    collect_payload_prepare_requested_specs \
+      "$passwall_roots_file" \
+      "$local_repo_search_root" \
+      "$requested_specs_file"
 
-      mapfile -t LOCAL_REPO_INDEXES < <(
-        {
-          find "$local_repo_root" -type f -name 'packages.adb'
-          if [ -d "$local_target_repo_root" ]; then
-            find "$local_target_repo_root" -type f -path '*/packages/packages.adb'
-          fi
-        } | LC_ALL=C sort -u
-      )
-      [ "${#LOCAL_REPO_INDEXES[@]}" -gt 0 ] || die "No local packages.adb indexes found under $local_repo_root or $local_target_repo_root"
-      printf 'file://%s\n' "${LOCAL_REPO_INDEXES[@]}" > "$local_repo_index_list"
-    }
-
-    make_combined_repositories() {
-      local repo_file="$1" dist_root target_path kmods_repo
-      dist_root="${OPENWRT_SDK_URL%%/targets/*}"
-      target_path=$(printf '%s' "$OPENWRT_SDK_URL" | sed -n 's#.*/targets/\([^/]*/[^/]*\)/.*#\1#p')
-      [ -n "$dist_root" ] || die "Cannot derive OpenWrt dist root from SDK URL"
-      [ -n "$target_path" ] || die "Cannot derive target path from SDK URL"
-      cat "$local_repo_index_list" > "$repo_file"
-      kmods_repo=$(resolve_remote_kmods_repo "$dist_root" "$target_path" || true)
-      cat >> "$repo_file" <<EOF
-$dist_root/targets/$target_path/packages/packages.adb
-$dist_root/packages/$arch_packages/base/packages.adb
-$dist_root/packages/$arch_packages/packages/packages.adb
-$dist_root/packages/$arch_packages/luci/packages.adb
-$dist_root/packages/$arch_packages/routing/packages.adb
-$dist_root/packages/$arch_packages/telephony/packages.adb
-EOF
-      if [ -n "$kmods_repo" ]; then
-        printf '%s\n' "$kmods_repo" >> "$repo_file"
-      else
-        log_warn "Unable to resolve remote kmods repository under targets/$target_path/kmods/"
-      fi
-    }
-
-    fetch_resolved_packages() {
-      local repo_file="$1" dest_dir="$2"
-      shift 2
-      [ "$#" -gt 0 ] || return 0
-      rm -rf "$dest_dir"
-      mkdir -p "$dest_dir"
-      "$apk_tool" \
-        --allow-untrusted \
-        --force-refresh \
-        --no-interactive \
-        --no-cache \
-        --arch "$arch_packages" \
-        --repositories-file "$repo_file" \
-        fetch --recursive --output "$dest_dir" "$@"
-    }
-
-    register_canonical_apk() {
-      local apk_file="$1" apk_source="$2"
-      local pkg_name current_file current_source preferred_file target_file
-
-      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
-      [ -n "$pkg_name" ] || return 0
-
-      current_file="${selected_apks[$pkg_name]:-}"
-      current_source="${selected_apk_source[$pkg_name]:-}"
-      if [ -n "$current_file" ]; then
-        if [ "$current_source" != "$apk_source" ]; then
-          [ "$apk_source" = "local" ] || return 0
-          preferred_file="$apk_file"
-        else
-          preferred_file=$(prefer_newer_file_by_basename "$current_file" "$apk_file")
-          [ "$preferred_file" = "$apk_file" ] || return 0
-        fi
-        rm -f "$current_file"
-      fi
-
-      target_file="$canonical_fetch_dir/$(basename "$apk_file")"
-      cp -f "$apk_file" "$target_file"
-      selected_apks["$pkg_name"]="$target_file"
-      selected_apk_source["$pkg_name"]="$apk_source"
-    }
-
-    canonicalize_resolved_packages() {
-      local apk_file pkg_name local_pkg_file
-      declare -A fetched_pkg_set=()
-
-      rm -rf "$canonical_fetch_dir"
-      mkdir -p "$canonical_fetch_dir"
-
-      selected_apks=()
-      selected_apk_source=()
-
-      while IFS= read -r -d '' apk_file; do
-        pkg_name=$(apk_package_name_from_file "$apk_file" || true)
-        [ -n "$pkg_name" ] || continue
-        fetched_pkg_set["$pkg_name"]=1
-        register_canonical_apk "$apk_file" "fetched"
-      done < <(find "$fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
-
-      while IFS= read -r pkg_name; do
-        [ -n "$pkg_name" ] || continue
-        local_pkg_file=$(find_payload_pkg_file "$local_repo_search_root" "$pkg_name" || true)
-        [ -n "$local_pkg_file" ] || continue
-        register_canonical_apk "$local_pkg_file" "local"
-      done < <(printf '%s\n' "${!fetched_pkg_set[@]}" | LC_ALL=C sort)
-    }
-
-    build_local_repository
-
-    toplevel_pkgs["luci-app-passwall"]=1
-    luci_spec=$(local_pkg_spec "$local_repo_search_root" "luci-app-passwall" || true)
-    [ -n "$luci_spec" ] || die "luci-app-passwall APK not found in local repository"
-    REQUESTED_SPECS+=("$luci_spec")
-    # Prefer dnsmasq-full as the provider for PassWall's virtual dnsmasq dependency
-    # so apk does not resolve it to the conflicting minimal dnsmasq package.
-    REQUESTED_SPECS+=("dnsmasq-full")
-
-    zh_spec=$(local_pkg_spec "$local_repo_search_root" "luci-i18n-passwall-zh-cn" || true)
-    if [ -n "$zh_spec" ]; then
-      toplevel_pkgs["luci-i18n-passwall-zh-cn"]=1
-      REQUESTED_SPECS+=("$zh_spec")
-    fi
-
-    root_count=0
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      root_count=$((root_count + 1))
-      toplevel_pkgs["$pkg"]=1
-      pkg_spec=$(local_pkg_spec "$local_repo_search_root" "$pkg" || true)
-      if [ -n "$pkg_spec" ]; then
-        REQUESTED_SPECS+=("$pkg_spec")
-      else
-        REQUESTED_SPECS+=("$pkg")
-        if map_passwall_source_dir "$pkg" >/dev/null 2>&1; then
-          missing_pkgs["$pkg"]=1
-        else
-          official_fetch_pkgs["$pkg"]=1
-        fi
-      fi
-    done < "$passwall_roots_file"
-
-    printf '%s\n' "${!toplevel_pkgs[@]}" | LC_ALL=C sort > "$toplevel_packages_file"
-
-    printf '%s\n' "${REQUESTED_SPECS[@]}" | sed '/^$/d' | LC_ALL=C sort -u > "$requested_specs_file"
-    mapfile -t REQUESTED_SPECS < "$requested_specs_file"
-    make_combined_repositories "$combined_repo_file"
-    fetch_resolved_packages "$combined_repo_file" "$fetch_dir" "${REQUESTED_SPECS[@]}" \
+    # Stage 2: resolve closure against local + official repositories.
+    collect_payload_make_combined_repositories "$combined_repo_file"
+    collect_payload_fetch_resolved_packages "$combined_repo_file" "$fetch_dir" "${REQUESTED_SPECS[@]}" \
       || die "Failed to resolve dependency closure from local and official repositories"
-    canonicalize_resolved_packages
+    collect_payload_canonicalize_resolved_packages
 
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      install_whitelist_pkgs["$pkg"]=1
-    done < "$passwall_roots_file"
-    install_whitelist_pkgs["luci-app-passwall"]=1
-    [ -n "$zh_spec" ] && install_whitelist_pkgs["luci-i18n-passwall-zh-cn"]=1
-    while IFS= read -r -d '' apk_file; do
-      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
-      [ -n "$pkg_name" ] || continue
-      if map_passwall_source_dir "$pkg_name" >/dev/null 2>&1; then
-        install_whitelist_pkgs["$pkg_name"]=1
-      fi
-    done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
-    if find_payload_pkg_file "$canonical_fetch_dir" "dnsmasq-full" >/dev/null 2>&1; then
-      install_whitelist_pkgs["dnsmasq-full"]=1
-    fi
-    printf '%s\n' "${!install_whitelist_pkgs[@]}" | LC_ALL=C sort > "$install_whitelist_file"
-    [ -s "$install_whitelist_file" ] || die "Installer whitelist is empty"
-
-    for pkg in "${!toplevel_pkgs[@]}"; do
-      pkg_file=$(find_payload_pkg_file "$canonical_fetch_dir" "$pkg" || true)
-      if [ -z "$pkg_file" ] && [ "$pkg" != "luci-i18n-passwall-zh-cn" ]; then
-        die "Top-level package missing after dependency resolution: $pkg"
-      fi
-    done
-
-    while IFS= read -r -d '' apk_file; do
-      cp "$apk_file" "$PAYLOAD_DIR/$(payload_apk_dir_name)/"
-    done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
+    # Stage 3: build installer whitelist, validate roots, and materialize payload APKs.
+    collect_payload_build_install_whitelist \
+      "$passwall_roots_file" \
+      "$canonical_fetch_dir" \
+      "$install_whitelist_file"
+    collect_payload_verify_toplevel_presence "$canonical_fetch_dir"
+    collect_payload_copy_canonical_apks "$canonical_fetch_dir" "$PAYLOAD_DIR"
 
     write_payload_package_manifest "$PAYLOAD_DIR" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
     write_payload_repository_indexes "$apk_tool" "$PAYLOAD_DIR"
 
-    dep_count=0
-    while IFS= read -r -d '' apk_file; do
-      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
-      [ -n "$pkg_name" ] || continue
-      [ -n "${toplevel_pkgs[$pkg_name]+x}" ] && continue
-      dep_count=$((dep_count + 1))
-    done < <(find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -type f -name '*.apk' -print0)
-
+    # Stage 4: emit summary and enforce final invariants.
+    dep_count=$(collect_payload_count_dependency_apks "$PAYLOAD_DIR/$(payload_apk_dir_name)")
     total_fetched=$(find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -name '*.apk' | wc -l)
     missing_count=${#missing_pkgs[@]}
 
@@ -837,53 +965,35 @@ EOF
 run_install_smoke_test() {
   step_start "Run installer smoke test"
   local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary smoke_expected_packages smoke_expected_mode has_dnsmasq_full smoke_exit
-  local smoke_apk_dir smoke_metadata_dir smoke_toplevel_file smoke_whitelist_file
+  local smoke_apk_dir smoke_metadata_dir smoke_whitelist_file
   mockbin="$WORKDIR/mockbin"
   install_log="$WORKDIR/install.log"
   apk_invocations="$WORKDIR/apk-invocations.log"
   smoke_payload_dir="$WORKDIR/payload-smoke"
   smoke_apk_dir="$smoke_payload_dir/$(payload_apk_dir_name)"
   smoke_metadata_dir="$smoke_payload_dir/$(payload_metadata_dir_name)"
-  smoke_toplevel_file="$smoke_payload_dir/$(payload_toplevel_packages_name)"
   smoke_whitelist_file="$smoke_payload_dir/$(payload_install_whitelist_name)"
 
   rm -rf "$smoke_payload_dir"
   mkdir -p "$smoke_apk_dir" "$smoke_metadata_dir"
   cp "$REPO_ROOT/payload/install.sh" "$smoke_payload_dir/install.sh"
-  cp "$PAYLOAD_DIR/$(payload_toplevel_packages_name)" "$smoke_toplevel_file"
-  smoke_expected_packages="$smoke_toplevel_file"
-  smoke_expected_mode="top-level"
-  if [ -f "$PAYLOAD_DIR/$(payload_install_whitelist_name)" ]; then
-    cp "$PAYLOAD_DIR/$(payload_install_whitelist_name)" "$smoke_whitelist_file"
-    smoke_expected_packages="$smoke_whitelist_file"
-    smoke_expected_mode="whitelist"
-  fi
+  [ -f "$PAYLOAD_DIR/$(payload_install_whitelist_name)" ] \
+    || die "Smoke payload missing INSTALL_WHITELIST"
+  cp "$PAYLOAD_DIR/$(payload_install_whitelist_name)" "$smoke_whitelist_file"
+  smoke_expected_packages="$smoke_whitelist_file"
+  smoke_expected_mode="whitelist"
   printf 'synthetic-root-index\n' > "$smoke_payload_dir/$(payload_repo_index_name)"
 
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
+    [ "$pkg" = "dnsmasq-full" ] && continue
     printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_apk_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
-  done < "$smoke_toplevel_file"
+  done < "$smoke_expected_packages"
 
   has_dnsmasq_full=0
   if find_payload_pkg_file "$PAYLOAD_DIR/$(payload_apk_dir_name)" "dnsmasq-full" >/dev/null 2>&1; then
     has_dnsmasq_full=1
     printf 'synthetic-dnsmasq-full\n' > "$smoke_apk_dir/dnsmasq-full-1.0-r1.apk"
-  fi
-
-  if [ -f "$smoke_whitelist_file" ]; then
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      case "$pkg" in
-        luci-app-passwall|luci-i18n-passwall-zh-cn|dnsmasq-full)
-          continue
-          ;;
-      esac
-      if grep -qx "$pkg" "$smoke_toplevel_file"; then
-        continue
-      fi
-      printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_apk_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
-    done < "$smoke_whitelist_file"
   fi
 
   printf 'synthetic-dependency\n' > "$smoke_apk_dir/example-dependency-1.0-r1.apk"
