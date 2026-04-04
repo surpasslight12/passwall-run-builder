@@ -104,11 +104,9 @@ validate_common_inputs() {
   step_start "Validate repository inputs"
   require_tool bash
   require_tool sh
-  require_tool python3
   require_tool makeself
   require_tool file
   require_tool sha256sum
-  [ -f "$REPO_ROOT/.github/workflows/passwall.yml" ] || die "Workflow file not found: .github/workflows/passwall.yml"
   bash -n "$REPO_ROOT/scripts/build-lib.sh"
   bash -n "$REPO_ROOT/scripts/local-build.sh"
   bash -n "$REPO_ROOT/scripts/full-build.sh"

@@ -184,11 +184,93 @@ config_default() {
 resolve_latest_github_release_tag() {
   local owner="$1" repo="$2"
   curl -fsSL --retry 3 --retry-delay 10 "https://api.github.com/repos/${owner}/${repo}/releases/latest" \
-    | python3 -c 'import json,sys; print((json.load(sys.stdin).get("tag_name") or "").strip())'
+    | tr -d '\n' \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
 }
 
 sed_escape_replacement() {
   printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+normalize_pkg_list_to_file() {
+  local raw_list="$1" out_file="$2"
+  printf '%s\n' "$raw_list" \
+    | tr ',\t' '  ' \
+    | tr ' ' '\n' \
+    | sed '/^$/d' \
+    | LC_ALL=C sort -u > "$out_file"
+}
+
+validate_pkg_tokens_in_file() {
+  local pkg_file="$1" context="$2" pkg
+  [ -f "$pkg_file" ] || return 0
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    [[ "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9+._-]*$ ]] || die "Invalid package token in ${context}: $pkg"
+  done < "$pkg_file"
+}
+
+assert_file_subset() {
+  local subset_file="$1" superset_file="$2" context="$3" pkg
+  [ -f "$subset_file" ] || return 0
+  [ -f "$superset_file" ] || die "Superset file not found: $superset_file"
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    grep -qx "$pkg" "$superset_file" || die "Unknown package in ${context}: $pkg"
+  done < "$subset_file"
+}
+
+assert_files_disjoint() {
+  local left_file="$1" right_file="$2" context="$3" pkg
+  [ -f "$left_file" ] || return 0
+  [ -f "$right_file" ] || return 0
+
+  while IFS= read -r pkg; do
+    [ -n "$pkg" ] || continue
+    if grep -qx "$pkg" "$right_file"; then
+      die "Package appears in both lists (${context}): $pkg"
+    fi
+  done < "$left_file"
+}
+
+prepare_compile_package_sets() {
+  local workspace_dir="$1" required_raw="$2" selected_raw="$3" unselected_raw="$4" all_raw="${5:-}"
+  local required_file selected_file unselected_file roots_file all_file
+
+  required_file="$workspace_dir/.passwall-required-packages"
+  selected_file="$workspace_dir/.passwall-selected-optional-packages"
+  unselected_file="$workspace_dir/.passwall-unselected-optional-packages"
+  roots_file="$workspace_dir/.passwall-package-roots"
+  all_file="$workspace_dir/.passwall-all-packages"
+
+  [ -n "$required_raw" ] || die "PASSWALL_REQUIRED_PACKAGES is empty; set required compile packages in config"
+
+  normalize_pkg_list_to_file "$required_raw" "$required_file"
+  normalize_pkg_list_to_file "$selected_raw" "$selected_file"
+  normalize_pkg_list_to_file "$unselected_raw" "$unselected_file"
+
+  validate_pkg_tokens_in_file "$required_file" "PASSWALL_REQUIRED_PACKAGES"
+  validate_pkg_tokens_in_file "$selected_file" "PASSWALL_OPTIONAL_SELECTED_PACKAGES"
+  validate_pkg_tokens_in_file "$unselected_file" "PASSWALL_OPTIONAL_UNSELECTED_PACKAGES"
+
+  cat "$required_file" "$selected_file" \
+    | sed '/^$/d' \
+    | LC_ALL=C sort -u > "$roots_file"
+
+  [ -s "$roots_file" ] || die "Generated compile root package list is empty"
+
+  if [ -n "$all_raw" ]; then
+    normalize_pkg_list_to_file "$all_raw" "$all_file"
+    validate_pkg_tokens_in_file "$all_file" "PASSWALL_ALL_PACKAGES"
+    [ -s "$all_file" ] || die "PASSWALL_ALL_PACKAGES resolved to empty list"
+    assert_file_subset "$required_file" "$all_file" "PASSWALL_REQUIRED_PACKAGES"
+    assert_file_subset "$selected_file" "$all_file" "PASSWALL_OPTIONAL_SELECTED_PACKAGES"
+    assert_file_subset "$unselected_file" "$all_file" "PASSWALL_OPTIONAL_UNSELECTED_PACKAGES"
+  fi
+
+  assert_files_disjoint "$roots_file" "$unselected_file" "selected vs unselected compile packages"
 }
 
 map_passwall_source_dir() {

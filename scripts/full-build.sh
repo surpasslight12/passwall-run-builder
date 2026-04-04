@@ -416,40 +416,12 @@ CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m
 CFG
     make defconfig </dev/null
 
-    [ -n "${PASSWALL_REQUIRED_PACKAGES:-}" ] || die "PASSWALL_REQUIRED_PACKAGES is empty; set required compile packages in config"
-
-    printf '%s\n' "$PASSWALL_REQUIRED_PACKAGES" \
-      | tr ',\t' '  ' \
-      | tr ' ' '\n' \
-      | sed '/^$/d' \
-      | LC_ALL=C sort -u > "$required_packages_file"
-
-    printf '%s\n' "${PASSWALL_OPTIONAL_SELECTED_PACKAGES:-}" \
-      | tr ',\t' '  ' \
-      | tr ' ' '\n' \
-      | sed '/^$/d' \
-      | LC_ALL=C sort -u > "$selected_optional_file"
-
-    printf '%s\n' "${PASSWALL_OPTIONAL_UNSELECTED_PACKAGES:-}" \
-      | tr ',\t' '  ' \
-      | tr ' ' '\n' \
-      | sed '/^$/d' \
-      | LC_ALL=C sort -u > "$unselected_optional_file"
-
-    cat "$required_packages_file" "$selected_optional_file" \
-      | sed '/^$/d' \
-      | LC_ALL=C sort -u > "$passwall_roots"
-
-    while IFS= read -r pkg; do
-      [[ "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9+._-]*$ ]] || die "Invalid package token in compile package lists: $pkg"
-    done < "$passwall_roots"
-
-    while IFS= read -r pkg; do
-      [ -n "$pkg" ] || continue
-      if grep -qx "$pkg" "$passwall_roots"; then
-        die "Package is listed as unselected but also selected for compile: $pkg"
-      fi
-    done < "$unselected_optional_file"
+    prepare_compile_package_sets \
+      "$FULL_SDK_DIR" \
+      "${PASSWALL_REQUIRED_PACKAGES:-}" \
+      "${PASSWALL_OPTIONAL_SELECTED_PACKAGES:-}" \
+      "${PASSWALL_OPTIONAL_UNSELECTED_PACKAGES:-}" \
+      "${PASSWALL_ALL_PACKAGES:-}"
   )
 
   [ -s "$passwall_roots" ] || die "Generated compile root package list is empty"
