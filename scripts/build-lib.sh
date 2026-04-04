@@ -254,7 +254,7 @@ payload_pkg_candidates() {
   local pkg="$1"
   case "$pkg" in
     nftables)
-      printf '%s\n' nftables nftables-nojson nftables-json
+      printf '%s\n' nftables nftables-json nftables-nojson
       ;;
     *)
       printf '%s\n' "$pkg"

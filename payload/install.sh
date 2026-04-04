@@ -55,7 +55,7 @@ payload_pkg_candidates() {
   pkg_name="$1"
   case "$pkg_name" in
     nftables)
-      printf '%s\n' nftables nftables-nojson nftables-json
+      printf '%s\n' nftables nftables-json nftables-nojson
       ;;
     *)
       printf '%s\n' "$pkg_name"
@@ -216,6 +216,30 @@ queue_conflict_removal() {
   CONFLICT_REMOVALS="${CONFLICT_REMOVALS:+$CONFLICT_REMOVALS }$remove_pkg"
 }
 
+queue_nftables_provider_conflict_removal() {
+  selected_nft_provider=""
+  set -- $INSTALL_TARGETS
+  for install_target in "$@"; do
+    case "$(basename "$install_target")" in
+      nftables-json-*.apk|nftables-json_*.apk)
+        selected_nft_provider="nftables-json"
+        ;;
+      nftables-nojson-*.apk|nftables-nojson_*.apk)
+        selected_nft_provider="nftables-nojson"
+        ;;
+    esac
+  done
+
+  case "$selected_nft_provider" in
+    nftables-json)
+      queue_conflict_removal "nftables-nojson"
+      ;;
+    nftables-nojson)
+      queue_conflict_removal "nftables-json"
+      ;;
+  esac
+}
+
 log "Starting PassWall installation..."
 [ -f "SHA256SUMS" ] || die "SHA256SUMS not found"
 [ -f "$PAYLOAD_MAP_FILE" ] || die "Payload package manifest missing: $PAYLOAD_MAP_FILE"
@@ -253,6 +277,8 @@ if [ "$HAS_DNSMASQ_FULL" -eq 1 ]; then
   queue_conflict_removal "dnsmasq"
   queue_conflict_removal "dnsmasq-dhcpv6"
 fi
+
+queue_nftables_provider_conflict_removal
 
 if [ -n "$CONFLICT_REMOVALS" ]; then
   log "Removing conflicting packages: $CONFLICT_REMOVALS"
