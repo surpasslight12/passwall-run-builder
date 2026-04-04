@@ -127,11 +127,12 @@ prepare_synthetic_payload() {
   printf 'synthetic-main-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/luci-app-passwall-${PASSWALL_VERSION_TAG}-r1.apk"
   printf 'synthetic-zh-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/luci-i18n-passwall-zh-cn-${PASSWALL_VERSION_TAG}-r1.apk"
   printf 'synthetic-xray-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/xray-core-${PASSWALL_VERSION_TAG}-r1.apk"
+  printf 'synthetic-hysteria-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/hysteria-${PASSWALL_VERSION_TAG}-r1.apk"
   printf 'synthetic-dnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/dnsmasq-full-1.0-r1.apk"
   printf 'synthetic-microsocks\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/microsocks-1.0.5-r1.apk"
   printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/example-dependency-1.0-r1.apk"
-  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
-  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/$(payload_install_whitelist_name)"
+  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\nhysteria\ndnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
+  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\nhysteria\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/$(payload_install_whitelist_name)"
   write_payload_package_manifest "$PAYLOAD_DIR" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
   printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/$(payload_repo_index_name)"
   generate_sha256_manifest "$PAYLOAD_DIR"
@@ -186,12 +187,16 @@ run_install_smoke_test() {
     || die "Smoke installer did not switch to explicit payload APK targets"
   grep -q "Installing .*packages: .*xray-core" "$install_log" \
     || die "Smoke installer did not include xray-core in embedded repo install list"
+  grep -q "Installing .*packages: .*hysteria" "$install_log" \
+    || die "Smoke installer did not include hysteria in embedded repo install list"
   grep -q "Installing .*packages: .*microsocks" "$install_log" \
     || die "Smoke installer did not include microsocks from INSTALL_WHITELIST"
   grep -q "Removing conflicting packages: dnsmasq dnsmasq-dhcpv6" "$install_log" \
     || die "Smoke installer did not exercise dnsmasq-full conflict removal"
   grep -q "add --allow-untrusted --force-reinstall .*xray-core-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing xray-core payload APK"
+  grep -q "add --allow-untrusted --force-reinstall .*hysteria-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
+    || die "Smoke installer apk add invocation missing hysteria payload APK"
   grep -q "add --allow-untrusted --force-reinstall .*apks/microsocks-1.0.5-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing microsocks payload APK"
   grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations" \

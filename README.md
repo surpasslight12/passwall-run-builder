@@ -13,7 +13,8 @@ Builds PassWall components and required APK dependencies via GitHub Actions into
 - **Rust 编译优化**（并行代码生成、优化 RUSTFLAGS）
 - 编译自动降级（并行 → 单线程）
 - 适配 OpenWrt 25.12+ APK 包管理器
-- 按 luci-app-passwall 的默认功能开关与目标架构条件自动分析并本地编译 PassWall 相关组件
+- 通过 `PASSWALL_REQUIRED_PACKAGES` + `PASSWALL_OPTIONAL_SELECTED_PACKAGES` 驱动编译与依赖收集（不再依赖构建时自动推导）
+- 默认将 `shadowsocks-libev` / `shadowsocks-rust` / `v2ray-plugin` 及相关插件放入 `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES`，按需启用
 - 对缺失的系统依赖 APK 自动从官方 OpenWrt 源拉取并并入 `.run`
 - 仅通过 `GO_VERSION` / `RUST_TOOLCHAIN_VERSION` 指定工具链版本，workflow 自动安装
 - 安装前自动校验 payload 内全部文件的 SHA256
@@ -79,8 +80,15 @@ Builds PassWall components and required APK dependencies via GitHub Actions into
 | `OPENWRT_SOURCE_*` | ✅ | OpenWrt 源码下载镜像 |
 | `GO_VERSION` | ✅ | Go 版本 |
 | `RUST_TOOLCHAIN_VERSION` | ✅ | Rust 版本 |
+| `PASSWALL_ALL_PACKAGES` | ✅ | 从 `openwrt-passwall-packages` 拉取并整理的全量包目录（含子包展开） |
+| `PASSWALL_REQUIRED_PACKAGES` | ✅ | 必选编译组件列表（始终参与编译） |
+| `PASSWALL_OPTIONAL_SELECTED_PACKAGES` | ✅ | 已选择的可选编译组件列表（会参与编译） |
+| `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` | ✅ | 未选择的可选组件列表（默认不编译） |
 | `GOPROXY` | ✅ | Go 模块代理链 |
-| `MIN_REQUIRED_PACKAGES` | ✅ | payload 依赖包数量下限保护 |
+
+默认策略：后续编译只覆盖“PassWall 本体 + `PASSWALL_REQUIRED_PACKAGES` + `PASSWALL_OPTIONAL_SELECTED_PACKAGES`”。
+
+若要启用默认未选组件（例如 `shadowsocks-libev-*`、`shadowsocks-rust-*`、`v2ray-plugin`），请从 `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` 移到 `PASSWALL_OPTIONAL_SELECTED_PACKAGES`。
 
 ### Workflow 手动触发参数 | Workflow Dispatch Inputs
 
@@ -118,7 +126,7 @@ passwall.yml
 
 `scripts/full-build.sh` 是线上 Action 和本地 `full` 模式共享的构建内核；workflow 只负责加载集中配置、解析触发上下文、准备 runner 环境、调用共享内核、上传产物与 release 封装。本地 `scripts/local-build.sh --mode full` 也直接走同一条 full build 路径，避免线上/本地行为漂移。
 
-共享 full build 内核会根据当前构建对应的 PassWall release tag，克隆匹配 tag 的 `openwrt-passwall`，并对 `openwrt-passwall-packages` 采用“优先同名 tag、否则回退默认分支”的策略；随后从 `luci-app-passwall` 的 Makefile 自动分析默认启用的功能开关，并结合目标架构条件生成 PassWall 根包列表。编译完成后，会先把本地产物构造成一个临时 APK 仓库，再让 `apk fetch --recursive` 同时从“本地仓库 + 与 SDK 同版本同架构的官方 OpenWrt 仓库”解析并抓取完整依赖闭包；payload 会在打包前按包名去重、优先保留本地构建版本，并额外生成 `INSTALL_WHITELIST` 供安装器默认使用。
+共享 full build 内核会根据当前构建对应的 PassWall release tag，克隆匹配 tag 的 `openwrt-passwall`，并对 `openwrt-passwall-packages` 采用“优先同名 tag、否则回退默认分支”的策略；编译集合来自 `config/config.conf` 中的三段式静态列表：`PASSWALL_REQUIRED_PACKAGES`（必选）+ `PASSWALL_OPTIONAL_SELECTED_PACKAGES`（已选可选），`PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` 仅用于记录未选项且不会参与编译。也就是说，后续编译仅覆盖“PassWall 本体 + 必选编译组件 + 已选可选编译组件”。编译完成后，会先把本地产物构造成一个临时 APK 仓库，再让 `apk fetch --recursive` 同时从“本地仓库 + 与 SDK 同版本同架构的官方 OpenWrt 仓库”解析并抓取完整依赖闭包；payload 会在打包前按包名去重、优先保留本地构建版本，并额外生成 `INSTALL_WHITELIST` 供安装器默认使用。
 
 当前 `.run` 内 payload 结构为：
 

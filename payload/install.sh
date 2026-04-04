@@ -57,6 +57,9 @@ payload_pkg_candidates() {
     nftables)
       printf '%s\n' nftables nftables-json nftables-nojson
       ;;
+    hysteria|hysteria2|hy2)
+      printf '%s\n' hysteria hysteria2 hy2
+      ;;
     *)
       printf '%s\n' "$pkg_name"
       ;;
@@ -68,6 +71,9 @@ normalize_payload_pkg_name() {
   case "$pkg_name" in
     nftables-nojson|nftables-json)
       printf '%s\n' nftables
+      ;;
+    hysteria2|hy2)
+      printf '%s\n' hysteria
       ;;
     *)
       printf '%s\n' "$pkg_name"
@@ -174,14 +180,14 @@ build_install_package_list() {
         INSTALL_MODE_RESOLVED="top-level"
       fi
       ;;
-    top-level|toplevel)
+    top-level)
       INSTALL_MODE_RESOLVED="top-level"
       ;;
     whitelist)
       [ -s "$WHITELIST_FILE" ] || die "INSTALL_WHITELIST not found for install mode whitelist"
       INSTALL_MODE_RESOLVED="whitelist"
       ;;
-    full|payload)
+    full)
       INSTALL_MODE_RESOLVED="full"
       ;;
     *)

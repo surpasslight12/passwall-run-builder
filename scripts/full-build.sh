@@ -120,6 +120,9 @@ load_config() {
   config_default "OPENWRT_SOURCE_CDN_URL" "https://sources.cdn.openwrt.org"
   config_default "OPENWRT_SOURCE_MIRROR_URL" "https://sources.openwrt.org"
   config_default "GOPROXY" "https://proxy.golang.org,https://goproxy.io,direct"
+  config_default "PASSWALL_REQUIRED_PACKAGES" "chinadns-ng dns2socks dnsmasq-full hysteria ipt2socks kmod-nft-nat kmod-nft-socket kmod-nft-tproxy nftables sing-box trojan-plus xray-core"
+  config_default "PASSWALL_OPTIONAL_SELECTED_PACKAGES" "geoview microsocks naiveproxy tcping tuic-client v2ray-geoip v2ray-geosite xray-plugin"
+  config_default "PASSWALL_OPTIONAL_UNSELECTED_PACKAGES" "shadow-tls simple-obfs-client simple-obfs-server v2ray-plugin shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-server shadowsocks-libev-ss-tunnel shadowsocksr-libev-ssr-check shadowsocksr-libev-ssr-local shadowsocksr-libev-ssr-nat shadowsocksr-libev-ssr-redir shadowsocksr-libev-ssr-server shadowsocks-rust-sslocal shadowsocks-rust-ssmanager shadowsocks-rust-ssserver shadowsocks-rust-ssservice shadowsocks-rust-ssurl"
   [[ "${OPENWRT_SDK_URL:-}" =~ ^https:// ]] || die "OPENWRT_SDK_URL must use https"
   log_info "Using SDK URL: $OPENWRT_SDK_URL"
   step_end
@@ -151,7 +154,6 @@ validate_inputs() {
   step_start "Validate build inputs"
   require_tool bash
   require_tool sh
-  require_tool python3
   require_tool curl
   require_tool make
   require_tool git
@@ -399,8 +401,11 @@ prefetch_rust_sources() {
 
 generate_full_config() {
   step_start "Generate build config"
-  local passwall_roots
+  local passwall_roots required_packages_file selected_optional_file unselected_optional_file
   passwall_roots="$FULL_SDK_DIR/.passwall-package-roots"
+  required_packages_file="$FULL_SDK_DIR/.passwall-required-packages"
+  selected_optional_file="$FULL_SDK_DIR/.passwall-selected-optional-packages"
+  unselected_optional_file="$FULL_SDK_DIR/.passwall-unselected-optional-packages"
 
   (
     cd "$FULL_SDK_DIR"
@@ -410,33 +415,48 @@ CONFIG_PACKAGE_luci-app-passwall=m
 CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m
 CFG
     make defconfig </dev/null
-    python3 - <<'PY'
-import re
-from pathlib import Path
 
-root = Path.cwd()
-makefile = root / "package/passwall-luci/luci-app-passwall/Makefile"
-config = (root / ".config").read_text()
-enabled = set(re.findall(r'^(CONFIG_PACKAGE_luci-app-passwall_[A-Za-z0-9_]+)=[ym]$', config, re.M))
+    [ -n "${PASSWALL_REQUIRED_PACKAGES:-}" ] || die "PASSWALL_REQUIRED_PACKAGES is empty; set required compile packages in config"
 
-roots = []
-current = None
-for raw_line in makefile.read_text().splitlines():
-    line = raw_line.strip()
-    match = re.match(r'^config PACKAGE_\$\(PKG_NAME\)_([A-Za-z0-9_]+)$', line)
-    if match:
-        current = f"CONFIG_PACKAGE_luci-app-passwall_{match.group(1)}"
-        continue
-    match = re.match(r'^select PACKAGE_([A-Za-z0-9_\-]+)$', line)
-    if match and current in enabled:
-        roots.append(match.group(1))
+    printf '%s\n' "$PASSWALL_REQUIRED_PACKAGES" \
+      | tr ',\t' '  ' \
+      | tr ' ' '\n' \
+      | sed '/^$/d' \
+      | LC_ALL=C sort -u > "$required_packages_file"
 
-(root / ".passwall-package-roots").write_text("\n".join(sorted(dict.fromkeys(roots))) + "\n")
-PY
+    printf '%s\n' "${PASSWALL_OPTIONAL_SELECTED_PACKAGES:-}" \
+      | tr ',\t' '  ' \
+      | tr ' ' '\n' \
+      | sed '/^$/d' \
+      | LC_ALL=C sort -u > "$selected_optional_file"
+
+    printf '%s\n' "${PASSWALL_OPTIONAL_UNSELECTED_PACKAGES:-}" \
+      | tr ',\t' '  ' \
+      | tr ' ' '\n' \
+      | sed '/^$/d' \
+      | LC_ALL=C sort -u > "$unselected_optional_file"
+
+    cat "$required_packages_file" "$selected_optional_file" \
+      | sed '/^$/d' \
+      | LC_ALL=C sort -u > "$passwall_roots"
+
+    while IFS= read -r pkg; do
+      [[ "$pkg" =~ ^[A-Za-z0-9][A-Za-z0-9+._-]*$ ]] || die "Invalid package token in compile package lists: $pkg"
+    done < "$passwall_roots"
+
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      if grep -qx "$pkg" "$passwall_roots"; then
+        die "Package is listed as unselected but also selected for compile: $pkg"
+      fi
+    done < "$unselected_optional_file"
   )
 
-  [ -s "$passwall_roots" ] || die "Generated PassWall root package list is empty"
-  log_info "Generated $(wc -l < "$passwall_roots") PassWall root packages"
+  [ -s "$passwall_roots" ] || die "Generated compile root package list is empty"
+  log_info "Loaded $(wc -l < "$required_packages_file") required compile packages"
+  log_info "Loaded $(wc -l < "$selected_optional_file") selected optional compile packages"
+  log_info "Loaded $(wc -l < "$unselected_optional_file") unselected optional packages"
+  log_info "Generated $(wc -l < "$passwall_roots") compile root packages (required + selected optional)"
   step_end
 }
 
@@ -809,7 +829,6 @@ EOF
 
     total_fetched=$(find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -name '*.apk' | wc -l)
     missing_count=${#missing_pkgs[@]}
-    min_deps=${MIN_REQUIRED_PACKAGES:-1}
 
     emit_payload_dependency_summary \
       "$root_count" \
@@ -820,7 +839,6 @@ EOF
       "${#official_fetch_pkgs[@]}"
 
     [ "$dep_count" -gt 0 ] || die "No dependency APKs found"
-    [ "$dep_count" -ge "$min_deps" ] || die "Only $dep_count dependency APKs collected (expected at least $min_deps)"
     [ "$missing_count" -eq 0 ] || die "Some locally built PassWall packages are missing from payload: ${!missing_pkgs[*]}"
   )
 

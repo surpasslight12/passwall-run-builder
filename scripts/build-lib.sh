@@ -256,6 +256,9 @@ payload_pkg_candidates() {
     nftables)
       printf '%s\n' nftables nftables-json nftables-nojson
       ;;
+    hysteria|hysteria2|hy2)
+      printf '%s\n' hysteria hysteria2 hy2
+      ;;
     *)
       printf '%s\n' "$pkg"
       ;;
