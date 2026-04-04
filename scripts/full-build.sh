@@ -460,19 +460,27 @@ generate_full_config() {
 
   (
     cd "$FULL_SDK_DIR"
-    rm -f .config .config.old 2>/dev/null || true
-    cat >> .config <<'CFG'
-CONFIG_PACKAGE_luci-app-passwall=m
-CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m
-CFG
-    make defconfig </dev/null
-
     prepare_compile_package_sets \
       "$FULL_SDK_DIR" \
       "${PASSWALL_REQUIRED_PACKAGES:-}" \
       "${PASSWALL_OPTIONAL_SELECTED_PACKAGES:-}" \
       "${PASSWALL_OPTIONAL_UNSELECTED_PACKAGES:-}" \
       "${PASSWALL_ALL_PACKAGES:-}"
+
+    rm -f .config .config.old 2>/dev/null || true
+    cat >> .config <<'CFG'
+CONFIG_PACKAGE_luci-app-passwall=m
+CONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m
+CFG
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      printf 'CONFIG_PACKAGE_%s=m\n' "$pkg" >> .config
+    done < "$passwall_roots"
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      printf '# CONFIG_PACKAGE_%s is not set\n' "$pkg" >> .config
+    done < "$unselected_optional_file"
+    make defconfig </dev/null
   )
 
   [ -s "$passwall_roots" ] || die "Generated compile root package list is empty"
@@ -517,18 +525,44 @@ resolve_remote_kmods_repo() {
   printf '%s/targets/%s/kmods/%s/packages.adb\n' "${dist_root%/}" "$target_path" "$kmods_dir"
 }
 
+map_external_source_dir() {
+  local pkg="$1" makefile
+
+  case "$pkg" in
+    kmod-*)
+      [ -d "package/kernel/linux" ] && {
+        printf '%s\n' "package/kernel/linux"
+        return 0
+      }
+      ;;
+  esac
+
+  makefile=$(grep -RslF --include='Makefile' "define Package/${pkg}" feeds package 2>/dev/null | LC_ALL=C sort | head -n 1 || true)
+  if [ -z "$makefile" ]; then
+    makefile=$(grep -RslF --include='Makefile' "PKG_NAME:=${pkg}" feeds package 2>/dev/null | LC_ALL=C sort | head -n 1 || true)
+  fi
+  [ -n "$makefile" ] || return 1
+  printf '%s\n' "$(dirname "$makefile")"
+}
+
 resolve_compile_source_dirs() {
   local passwall_roots_file="$1" output_file="$2"
   local pkg src_dir
-  declare -A local_source_pkgs=()
+  declare -A local_source_pkgs=() unresolved_pkgs=()
 
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
     src_dir=$(map_passwall_source_dir "$pkg" || true)
-    [ -n "$src_dir" ] || continue
+    [ -n "$src_dir" ] || src_dir=$(map_external_source_dir "$pkg" || true)
+    if [ -z "$src_dir" ]; then
+      unresolved_pkgs["$pkg"]=1
+      continue
+    fi
     local_source_pkgs["$src_dir"]+=" $pkg"
   done < "$passwall_roots_file"
   local_source_pkgs["package/passwall-luci/luci-app-passwall"]+=" luci-app-passwall luci-i18n-passwall-zh-cn"
+
+  [ "${#unresolved_pkgs[@]}" -eq 0 ] || die "Cannot map compile source directory for configured packages: ${!unresolved_pkgs[*]}"
 
   printf '%s\n' "${!local_source_pkgs[@]}" | LC_ALL=C sort > "$output_file"
   [ -s "$output_file" ] || die "No package source directories resolved from $passwall_roots_file"
