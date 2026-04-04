@@ -550,12 +550,15 @@ compile_full_sources() {
 reset_payload_dir() {
   local payload_dir="$1"
 
-  mkdir -p "$payload_dir/depends"
+  rm -rf \
+    "$payload_dir/$(payload_apk_dir_name)" \
+    "$payload_dir/depends" \
+    "$payload_dir/$(payload_metadata_dir_name)"
+  mkdir -p \
+    "$payload_dir/$(payload_apk_dir_name)" \
+    "$payload_dir/$(payload_metadata_dir_name)"
   find "$payload_dir" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' \) \
-    -delete 2>/dev/null || true
-  find "$payload_dir/depends" -maxdepth 1 -type f \
-    \( -name '*.apk' -o -name 'packages.adb' \) \
+    \( -name '*.apk' -o -name '*.run' -o -name 'SHA256SUMS' -o -name 'packages.adb' -o -name 'TOPLEVEL_PACKAGES' -o -name 'INSTALL_WHITELIST' -o -name 'PAYLOAD_APK_MAP' \) \
     -delete 2>/dev/null || true
   if [ "$(realpath "$REPO_ROOT/payload/install.sh")" != "$(realpath -m "$payload_dir/install.sh")" ]; then
     cp "$REPO_ROOT/payload/install.sh" "$payload_dir/install.sh"
@@ -564,17 +567,14 @@ reset_payload_dir() {
 
 write_payload_repository_indexes() {
   local apk_tool="$1" payload_dir="$2"
-  local -a payload_top_apks payload_dep_apks
+  local apk_dir
+  local -a payload_apks
 
-  mapfile -t payload_top_apks < <(find "$payload_dir" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
-  [ "${#payload_top_apks[@]}" -gt 0 ] || die "Payload root APK set is empty"
-  "$apk_tool" --allow-untrusted mkndx --output "$payload_dir/packages.adb" "${payload_top_apks[@]}" \
-    >/dev/null || die "Failed to generate payload root repository index"
-
-  mapfile -t payload_dep_apks < <(find "$payload_dir/depends" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
-  [ "${#payload_dep_apks[@]}" -gt 0 ] || die "Payload dependency APK set is empty"
-  "$apk_tool" --allow-untrusted mkndx --output "$payload_dir/depends/packages.adb" "${payload_dep_apks[@]}" \
-    >/dev/null || die "Failed to generate payload dependency repository index"
+  apk_dir="$payload_dir/$(payload_apk_dir_name)"
+  mapfile -t payload_apks < <(find "$apk_dir" -maxdepth 1 -type f -name '*.apk' | LC_ALL=C sort)
+  [ "${#payload_apks[@]}" -gt 0 ] || die "Payload APK set is empty"
+  "$apk_tool" --allow-untrusted mkndx --output "$payload_dir/$(payload_repo_index_name)" "${payload_apks[@]}" \
+    >/dev/null || die "Failed to generate payload repository index"
 }
 
 emit_payload_dependency_summary() {
@@ -593,7 +593,7 @@ emit_payload_dependency_summary() {
 collect_full_payload() {
   step_start "Collect payload"
   local local_repo_root local_target_repo_root local_repo_search_root
-  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir canonical_fetch_dir combined_repo_file requested_specs_file install_whitelist_file
+  local passwall_roots_file apk_tool arch_packages local_repo_index_list fetch_dir canonical_fetch_dir combined_repo_file requested_specs_file toplevel_packages_file install_whitelist_file
   local_repo_root="$FULL_SDK_DIR/bin/packages"
   local_target_repo_root="$FULL_SDK_DIR/bin/targets"
   local_repo_search_root="$FULL_SDK_DIR/bin"
@@ -605,7 +605,8 @@ collect_full_payload() {
   canonical_fetch_dir="$FULL_SDK_DIR/.resolved-apks-canonical"
   combined_repo_file="$FULL_SDK_DIR/.combined-repositories"
   requested_specs_file="$WORKDIR/requested-specs.txt"
-  install_whitelist_file="$PAYLOAD_DIR/INSTALL_WHITELIST"
+  toplevel_packages_file="$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
+  install_whitelist_file="$PAYLOAD_DIR/$(payload_install_whitelist_name)"
 
   reset_payload_dir "$PAYLOAD_DIR"
 
@@ -616,7 +617,7 @@ collect_full_payload() {
 
   (
     cd "$FULL_SDK_DIR"
-    declare -A toplevel_pkgs=() top_files=() missing_pkgs=() official_fetch_pkgs=() selected_apks=() selected_apk_source=() install_whitelist_pkgs=()
+    declare -A toplevel_pkgs=() missing_pkgs=() official_fetch_pkgs=() selected_apks=() selected_apk_source=() install_whitelist_pkgs=()
     REQUESTED_SPECS=()
 
     build_local_repository() {
@@ -756,7 +757,7 @@ EOF
       fi
     done < "$passwall_roots_file"
 
-    printf '%s\n' "${!toplevel_pkgs[@]}" | LC_ALL=C sort > "$PAYLOAD_DIR/TOPLEVEL_PACKAGES"
+    printf '%s\n' "${!toplevel_pkgs[@]}" | LC_ALL=C sort > "$toplevel_packages_file"
 
     printf '%s\n' "${REQUESTED_SPECS[@]}" | sed '/^$/d' | LC_ALL=C sort -u > "$requested_specs_file"
     mapfile -t REQUESTED_SPECS < "$requested_specs_file"
@@ -786,25 +787,27 @@ EOF
 
     for pkg in "${!toplevel_pkgs[@]}"; do
       pkg_file=$(find_payload_pkg_file "$canonical_fetch_dir" "$pkg" || true)
-      if [ -n "$pkg_file" ]; then
-        cp "$pkg_file" "$PAYLOAD_DIR/"
-        top_files["$(basename "$pkg_file")"]=1
-      elif [ "$pkg" != "luci-i18n-passwall-zh-cn" ]; then
+      if [ -z "$pkg_file" ] && [ "$pkg" != "luci-i18n-passwall-zh-cn" ]; then
         die "Top-level package missing after dependency resolution: $pkg"
       fi
     done
 
     while IFS= read -r -d '' apk_file; do
-      base_name=$(basename "$apk_file")
-      [ -n "${top_files[$base_name]+x}" ] && continue
-      cp "$apk_file" "$PAYLOAD_DIR/depends/"
+      cp "$apk_file" "$PAYLOAD_DIR/$(payload_apk_dir_name)/"
     done < <(find "$canonical_fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
-    write_payload_package_manifest "$PAYLOAD_DIR"
+    write_payload_package_manifest "$PAYLOAD_DIR" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
     write_payload_repository_indexes "$apk_tool" "$PAYLOAD_DIR"
 
-    dep_count=$(find "$PAYLOAD_DIR/depends" -maxdepth 1 -name '*.apk' | wc -l)
-    total_fetched=$(find "$canonical_fetch_dir" -maxdepth 1 -name '*.apk' | wc -l)
+    dep_count=0
+    while IFS= read -r -d '' apk_file; do
+      pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+      [ -n "$pkg_name" ] || continue
+      [ -n "${toplevel_pkgs[$pkg_name]+x}" ] && continue
+      dep_count=$((dep_count + 1))
+    done < <(find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -type f -name '*.apk' -print0)
+
+    total_fetched=$(find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -name '*.apk' | wc -l)
     missing_count=${#missing_pkgs[@]}
     min_deps=${MIN_REQUIRED_PACKAGES:-1}
 
@@ -821,7 +824,7 @@ EOF
     [ "$missing_count" -eq 0 ] || die "Some locally built PassWall packages are missing from payload: ${!missing_pkgs[*]}"
   )
 
-  find "$PAYLOAD_DIR" -maxdepth 1 -type f \
+  find "$PAYLOAD_DIR/$(payload_apk_dir_name)" -maxdepth 1 -type f \
     \( -name 'luci-app-passwall-*.apk' -o -name 'luci-app-passwall_*.apk' \) \
     -print -quit | grep -q . \
     || die "Payload missing luci-app-passwall APK"
@@ -833,37 +836,41 @@ EOF
 run_install_smoke_test() {
   step_start "Run installer smoke test"
   local mockbin install_log apk_invocations smoke_payload_dir pkg smoke_status smoke_summary smoke_expected_packages smoke_expected_mode has_dnsmasq_full smoke_exit
+  local smoke_apk_dir smoke_metadata_dir smoke_toplevel_file smoke_whitelist_file
   mockbin="$WORKDIR/mockbin"
   install_log="$WORKDIR/install.log"
   apk_invocations="$WORKDIR/apk-invocations.log"
   smoke_payload_dir="$WORKDIR/payload-smoke"
+  smoke_apk_dir="$smoke_payload_dir/$(payload_apk_dir_name)"
+  smoke_metadata_dir="$smoke_payload_dir/$(payload_metadata_dir_name)"
+  smoke_toplevel_file="$smoke_payload_dir/$(payload_toplevel_packages_name)"
+  smoke_whitelist_file="$smoke_payload_dir/$(payload_install_whitelist_name)"
 
   rm -rf "$smoke_payload_dir"
-  mkdir -p "$smoke_payload_dir/depends"
+  mkdir -p "$smoke_apk_dir" "$smoke_metadata_dir"
   cp "$REPO_ROOT/payload/install.sh" "$smoke_payload_dir/install.sh"
-  cp "$PAYLOAD_DIR/TOPLEVEL_PACKAGES" "$smoke_payload_dir/TOPLEVEL_PACKAGES"
-  smoke_expected_packages="$smoke_payload_dir/TOPLEVEL_PACKAGES"
+  cp "$PAYLOAD_DIR/$(payload_toplevel_packages_name)" "$smoke_toplevel_file"
+  smoke_expected_packages="$smoke_toplevel_file"
   smoke_expected_mode="top-level"
-  if [ -f "$PAYLOAD_DIR/INSTALL_WHITELIST" ]; then
-    cp "$PAYLOAD_DIR/INSTALL_WHITELIST" "$smoke_payload_dir/INSTALL_WHITELIST"
-    smoke_expected_packages="$smoke_payload_dir/INSTALL_WHITELIST"
+  if [ -f "$PAYLOAD_DIR/$(payload_install_whitelist_name)" ]; then
+    cp "$PAYLOAD_DIR/$(payload_install_whitelist_name)" "$smoke_whitelist_file"
+    smoke_expected_packages="$smoke_whitelist_file"
     smoke_expected_mode="whitelist"
   fi
-  printf 'synthetic-root-index\n' > "$smoke_payload_dir/packages.adb"
-  printf 'synthetic-dep-index\n' > "$smoke_payload_dir/depends/packages.adb"
+  printf 'synthetic-root-index\n' > "$smoke_payload_dir/$(payload_repo_index_name)"
 
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
-    printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_payload_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
-  done < "$smoke_payload_dir/TOPLEVEL_PACKAGES"
+    printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_apk_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
+  done < "$smoke_toplevel_file"
 
   has_dnsmasq_full=0
-  if find_payload_pkg_file "$PAYLOAD_DIR" "dnsmasq-full" >/dev/null 2>&1; then
+  if find_payload_pkg_file "$PAYLOAD_DIR/$(payload_apk_dir_name)" "dnsmasq-full" >/dev/null 2>&1; then
     has_dnsmasq_full=1
-    printf 'synthetic-dnsmasq-full\n' > "$smoke_payload_dir/dnsmasq-full-1.0-r1.apk"
+    printf 'synthetic-dnsmasq-full\n' > "$smoke_apk_dir/dnsmasq-full-1.0-r1.apk"
   fi
 
-  if [ -f "$smoke_payload_dir/INSTALL_WHITELIST" ]; then
+  if [ -f "$smoke_whitelist_file" ]; then
     while IFS= read -r pkg; do
       [ -n "$pkg" ] || continue
       case "$pkg" in
@@ -871,15 +878,15 @@ run_install_smoke_test() {
           continue
           ;;
       esac
-      if grep -qx "$pkg" "$smoke_payload_dir/TOPLEVEL_PACKAGES"; then
+      if grep -qx "$pkg" "$smoke_toplevel_file"; then
         continue
       fi
-      printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_payload_dir/depends/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
-    done < "$smoke_payload_dir/INSTALL_WHITELIST"
+      printf 'synthetic-%s-%s\n' "$pkg" "$PASSWALL_VERSION_TAG" > "$smoke_apk_dir/${pkg}-${PASSWALL_VERSION_TAG}-r1.apk"
+    done < "$smoke_whitelist_file"
   fi
 
-  printf 'synthetic-dependency\n' > "$smoke_payload_dir/depends/example-dependency-1.0-r1.apk"
-  write_payload_package_manifest "$smoke_payload_dir"
+  printf 'synthetic-dependency\n' > "$smoke_apk_dir/example-dependency-1.0-r1.apk"
+  write_payload_package_manifest "$smoke_payload_dir" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
   generate_sha256_manifest "$smoke_payload_dir"
 
   smoke_status="ok"

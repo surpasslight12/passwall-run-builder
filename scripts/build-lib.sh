@@ -316,15 +316,42 @@ build_payload_dependency_summary() {
   printf '%s' "$summary"
 }
 
+payload_apk_dir_name() {
+  printf '%s\n' "apks"
+}
+
+payload_metadata_dir_name() {
+  printf '%s\n' "metadata"
+}
+
+payload_toplevel_packages_name() {
+  printf '%s\n' "$(payload_metadata_dir_name)/TOPLEVEL_PACKAGES"
+}
+
+payload_install_whitelist_name() {
+  printf '%s\n' "$(payload_metadata_dir_name)/INSTALL_WHITELIST"
+}
+
 payload_package_manifest_name() {
-  printf '%s\n' "PAYLOAD_APK_MAP"
+  printf '%s\n' "$(payload_metadata_dir_name)/PAYLOAD_APK_MAP"
+}
+
+payload_repo_index_name() {
+  printf '%s\n' "$(payload_apk_dir_name)/packages.adb"
 }
 
 write_payload_package_manifest() {
-  local payload_dir="$1" manifest_path apk_file rel_path pkg_name current_path preferred_path
+  local payload_dir="$1"
+  local apk_rel_dir="${2:-$(payload_apk_dir_name)}"
+  local manifest_rel_path="${3:-$(payload_package_manifest_name)}"
+  local apk_dir manifest_path apk_file rel_path pkg_name current_path preferred_path
   declare -A pkg_paths=()
 
-  manifest_path="$payload_dir/$(payload_package_manifest_name)"
+  apk_dir="$payload_dir/$apk_rel_dir"
+  manifest_path="$payload_dir/$manifest_rel_path"
+  [ -d "$apk_dir" ] || die "Payload APK directory missing for manifest: $apk_dir"
+  mkdir -p "$(dirname "$manifest_path")"
+
   while IFS= read -r -d '' apk_file; do
     rel_path="${apk_file#"$payload_dir"/}"
     pkg_name=$(apk_package_name_from_file "$apk_file" || true)
@@ -336,7 +363,7 @@ write_payload_package_manifest() {
       [ "$preferred_path" = "$apk_file" ] || continue
     fi
     pkg_paths["$pkg_name"]="$rel_path"
-  done < <(find "$payload_dir" -maxdepth 2 -type f -name '*.apk' -print0)
+  done < <(find "$apk_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
   : > "$manifest_path"
   while IFS= read -r pkg_name; do

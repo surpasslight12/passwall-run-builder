@@ -118,21 +118,22 @@ validate_common_inputs() {
 
 prepare_synthetic_payload() {
   step_start "Prepare synthetic payload"
-  mkdir -p "$PAYLOAD_DIR/depends"
+  mkdir -p \
+    "$PAYLOAD_DIR/$(payload_apk_dir_name)" \
+    "$PAYLOAD_DIR/$(payload_metadata_dir_name)"
   if [ "$(realpath "$REPO_ROOT/payload/install.sh")" != "$(realpath -m "$PAYLOAD_DIR/install.sh")" ]; then
     cp "$REPO_ROOT/payload/install.sh" "$PAYLOAD_DIR/install.sh"
   fi
-  printf 'synthetic-main-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/luci-app-passwall-${PASSWALL_VERSION_TAG}-r1.apk"
-  printf 'synthetic-zh-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/luci-i18n-passwall-zh-cn-${PASSWALL_VERSION_TAG}-r1.apk"
-  printf 'synthetic-xray-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/xray-core-${PASSWALL_VERSION_TAG}-r1.apk"
-  printf 'synthetic-dnsmasq-full\n' > "$PAYLOAD_DIR/dnsmasq-full-1.0-r1.apk"
-  printf 'synthetic-microsocks\n' > "$PAYLOAD_DIR/depends/microsocks-1.0.5-r1.apk"
-  printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/depends/example-dependency-1.0-r1.apk"
-  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\n' > "$PAYLOAD_DIR/TOPLEVEL_PACKAGES"
-  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/INSTALL_WHITELIST"
-  write_payload_package_manifest "$PAYLOAD_DIR"
-  printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/packages.adb"
-  printf 'synthetic-dep-index\n' > "$PAYLOAD_DIR/depends/packages.adb"
+  printf 'synthetic-main-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/luci-app-passwall-${PASSWALL_VERSION_TAG}-r1.apk"
+  printf 'synthetic-zh-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/luci-i18n-passwall-zh-cn-${PASSWALL_VERSION_TAG}-r1.apk"
+  printf 'synthetic-xray-%s\n' "$PASSWALL_VERSION_TAG" > "$PAYLOAD_DIR/$(payload_apk_dir_name)/xray-core-${PASSWALL_VERSION_TAG}-r1.apk"
+  printf 'synthetic-dnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/dnsmasq-full-1.0-r1.apk"
+  printf 'synthetic-microsocks\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/microsocks-1.0.5-r1.apk"
+  printf 'synthetic-dependency\n' > "$PAYLOAD_DIR/$(payload_apk_dir_name)/example-dependency-1.0-r1.apk"
+  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\n' > "$PAYLOAD_DIR/$(payload_toplevel_packages_name)"
+  printf 'luci-app-passwall\nluci-i18n-passwall-zh-cn\nxray-core\ndnsmasq-full\nmicrosocks\n' > "$PAYLOAD_DIR/$(payload_install_whitelist_name)"
+  write_payload_package_manifest "$PAYLOAD_DIR" "$(payload_apk_dir_name)" "$(payload_package_manifest_name)"
+  printf 'synthetic-root-index\n' > "$PAYLOAD_DIR/$(payload_repo_index_name)"
   generate_sha256_manifest "$PAYLOAD_DIR"
   [ -s "$PAYLOAD_DIR/SHA256SUMS" ] || die "Synthetic payload checksum manifest missing"
   step_end
@@ -191,7 +192,7 @@ run_install_smoke_test() {
     || die "Smoke installer did not exercise dnsmasq-full conflict removal"
   grep -q "add --allow-untrusted --force-reinstall .*xray-core-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing xray-core payload APK"
-  grep -q "add --allow-untrusted --force-reinstall .*depends/microsocks-1.0.5-r1.apk" "$apk_invocations" \
+  grep -q "add --allow-untrusted --force-reinstall .*apks/microsocks-1.0.5-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing microsocks payload APK"
   grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations" \
     || die "Smoke installer apk del invocation missing dnsmasq conflict removal"

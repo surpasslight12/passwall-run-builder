@@ -15,10 +15,10 @@ Builds PassWall components and required APK dependencies via GitHub Actions into
 - 适配 OpenWrt 25.12+ APK 包管理器
 - 按 luci-app-passwall 的默认功能开关与目标架构条件自动分析并本地编译 PassWall 相关组件
 - 对缺失的系统依赖 APK 自动从官方 OpenWrt 源拉取并并入 `.run`
-- 固定 Go / Rust 工具链版本并校验官方安装包
+- 仅通过 `GO_VERSION` / `RUST_TOOLCHAIN_VERSION` 指定工具链版本，workflow 自动安装
 - 安装前自动校验 payload 内全部文件的 SHA256
-- 安装时优先使用 payload 内嵌的本地 APK 仓库索引，避免默认 `dnsmasq`/`ip-tiny` 等 provider 与 PassWall 依赖冲突
-- payload 会额外生成显式包名到 APK 路径的 manifest，安装时优先按该 manifest 精确重装内嵌组件，避免同版本组件被误判为已安装
+- 安装时仅使用 payload 内嵌仓库索引与包路径 manifest，避免默认 `dnsmasq`/`ip-tiny` 等 provider 与 PassWall 依赖冲突
+- payload 采用统一目录结构：`apks/` 存放全部 APK，`metadata/` 存放安装清单与 manifest，安装逻辑更直接
 - 安装器支持 `auto` / `top-level` / `whitelist` / `full` 模式，默认优先安装构建时生成的 PassWall 组件白名单
 - payload 在打包前按包名去重，优先保留本地编译版本，减少版本漂移
 - 支持手动触发构建，也支持定时同步上游稳定版 tag 后自动构建
@@ -77,8 +77,8 @@ Builds PassWall components and required APK dependencies via GitHub Actions into
 | `OPENWRT_BASE_FEED_REPO` | ✅ | OpenWrt base feed 镜像地址 |
 | `OPENWRT_*_FEED_REPO` | ✅ | OpenWrt feed 镜像地址 |
 | `OPENWRT_SOURCE_*` | ✅ | OpenWrt 源码下载镜像 |
-| `GO_VERSION` / `GO_SHA256_LINUX_AMD64` | ✅ | Go 版本与校验值 |
-| `RUST_TOOLCHAIN_VERSION` / `RUSTUP_INIT_*` | ✅ | Rust 版本、安装地址与校验值 |
+| `GO_VERSION` | ✅ | Go 版本 |
+| `RUST_TOOLCHAIN_VERSION` | ✅ | Rust 版本 |
 | `GOPROXY` | ✅ | Go 模块代理链 |
 | `MIN_REQUIRED_PACKAGES` | ✅ | payload 依赖包数量下限保护 |
 
@@ -119,6 +119,21 @@ passwall.yml
 `scripts/full-build.sh` 是线上 Action 和本地 `full` 模式共享的构建内核；workflow 只负责加载集中配置、解析触发上下文、准备 runner 环境、调用共享内核、上传产物与 release 封装。本地 `scripts/local-build.sh --mode full` 也直接走同一条 full build 路径，避免线上/本地行为漂移。
 
 共享 full build 内核会根据当前构建对应的 PassWall release tag，克隆匹配 tag 的 `openwrt-passwall`，并对 `openwrt-passwall-packages` 采用“优先同名 tag、否则回退默认分支”的策略；随后从 `luci-app-passwall` 的 Makefile 自动分析默认启用的功能开关，并结合目标架构条件生成 PassWall 根包列表。编译完成后，会先把本地产物构造成一个临时 APK 仓库，再让 `apk fetch --recursive` 同时从“本地仓库 + 与 SDK 同版本同架构的官方 OpenWrt 仓库”解析并抓取完整依赖闭包；payload 会在打包前按包名去重、优先保留本地构建版本，并额外生成 `INSTALL_WHITELIST` 供安装器默认使用。
+
+当前 `.run` 内 payload 结构为：
+
+```text
+payload/
+  install.sh
+  apks/
+    *.apk
+    packages.adb
+  metadata/
+    TOPLEVEL_PACKAGES
+    INSTALL_WHITELIST
+    PAYLOAD_APK_MAP
+  SHA256SUMS
+```
 
 ## 本地验证入口 | Local Validation Entry
 

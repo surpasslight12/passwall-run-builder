@@ -31,11 +31,7 @@ jobs:
     outputs:
       config_path: ${{ steps.config.outputs.config_path }}
       go_version: ${{ steps.config.outputs.go_version }}
-      go_download_base_url: ${{ steps.config.outputs.go_download_base_url }}
-      go_sha256_linux_amd64: ${{ steps.config.outputs.go_sha256_linux_amd64 }}
       rust_toolchain_version: ${{ steps.config.outputs.rust_toolchain_version }}
-      rustup_init_url_linux_amd64: ${{ steps.config.outputs.rustup_init_url_linux_amd64 }}
-      rustup_init_sha256_linux_amd64: ${{ steps.config.outputs.rustup_init_sha256_linux_amd64 }}
       passwall_upstream_owner: ${{ steps.config.outputs.passwall_upstream_owner }}
       passwall_upstream_repo: ${{ steps.config.outputs.passwall_upstream_repo }}
     defaults:
@@ -57,11 +53,7 @@ jobs:
             PASSWALL_UPSTREAM_OWNER
             PASSWALL_UPSTREAM_REPO
             GO_VERSION
-            GO_DOWNLOAD_BASE_URL
-            GO_SHA256_LINUX_AMD64
             RUST_TOOLCHAIN_VERSION
-            RUSTUP_INIT_URL_LINUX_AMD64
-            RUSTUP_INIT_SHA256_LINUX_AMD64
           )
           for key in "${required_vars[@]}"; do
             [ -n "${!key:-}" ] || die "Missing required config key: $key"
@@ -70,11 +62,7 @@ jobs:
           {
             printf 'config_path=%s\n' 'config/config.conf'
             printf 'go_version=%s\n' "$GO_VERSION"
-            printf 'go_download_base_url=%s\n' "$GO_DOWNLOAD_BASE_URL"
-            printf 'go_sha256_linux_amd64=%s\n' "$GO_SHA256_LINUX_AMD64"
             printf 'rust_toolchain_version=%s\n' "$RUST_TOOLCHAIN_VERSION"
-            printf 'rustup_init_url_linux_amd64=%s\n' "$RUSTUP_INIT_URL_LINUX_AMD64"
-            printf 'rustup_init_sha256_linux_amd64=%s\n' "$RUSTUP_INIT_SHA256_LINUX_AMD64"
             printf 'passwall_upstream_owner=%s\n' "$PASSWALL_UPSTREAM_OWNER"
             printf 'passwall_upstream_repo=%s\n' "$PASSWALL_UPSTREAM_REPO"
           } >> "$GITHUB_OUTPUT"
@@ -210,8 +198,15 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential libncurses5-dev gawk gettext unzip file \
             libssl-dev wget python3 git ca-certificates makeself zstd \
+            curl \
             || die "apt-get install failed"
           step_end
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ needs.load-config.outputs.go_version }}
+          check-latest: true
 
       - name: Install toolchains
         run: |
@@ -219,19 +214,6 @@ jobs:
           step_start "Install toolchains"
 
           GO_VER="${{ needs.load-config.outputs.go_version }}"
-          GO_BASE_URL="${{ needs.load-config.outputs.go_download_base_url }}"
-          GO_TARBALL="go${GO_VER}.linux-amd64.tar.gz"
-          CURRENT_GO=$(go version 2>/dev/null | awk '{print $3}' | sed 's/go//' || true)
-          if [ "$CURRENT_GO" != "$GO_VER" ]; then
-            retry 3 20 wget -q "${GO_BASE_URL}/${GO_TARBALL}" -O "/tmp/${GO_TARBALL}"
-            printf '%s  %s\n' "${{ needs.load-config.outputs.go_sha256_linux_amd64 }}" "/tmp/${GO_TARBALL}" | sha256sum -c - \
-              || die "Go tarball checksum verification failed"
-            sudo rm -rf /usr/local/go
-            sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
-            rm -f "/tmp/${GO_TARBALL}"
-          fi
-          export PATH="/usr/local/go/bin:$PATH"
-          echo "/usr/local/go/bin" >> "$GITHUB_PATH"
           GO_ACTUAL=$(go version | awk '{print $3}' | sed 's/go//')
           [ "$GO_ACTUAL" = "$GO_VER" ] || die "Go verification failed: expected $GO_VER, got $GO_ACTUAL"
 
@@ -240,13 +222,7 @@ jobs:
             source "$HOME/.cargo/env"
           fi
           if ! command -v rustup >/dev/null 2>&1; then
-            RUSTUP_INIT="/tmp/rustup-init"
-            retry 3 20 wget -q "${{ needs.load-config.outputs.rustup_init_url_linux_amd64 }}" -O "$RUSTUP_INIT"
-            printf '%s  %s\n' "${{ needs.load-config.outputs.rustup_init_sha256_linux_amd64 }}" "$RUSTUP_INIT" | sha256sum -c - \
-              || die "rustup-init checksum verification failed"
-            chmod +x "$RUSTUP_INIT"
-            "$RUSTUP_INIT" -y --profile minimal --default-toolchain "$RUST_VER" --no-modify-path
-            rm -f "$RUSTUP_INIT"
+            retry 3 20 curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_VER"
             source "$HOME/.cargo/env"
           fi
           retry 3 20 rustup toolchain install "$RUST_VER" --profile minimal --no-self-update
