@@ -262,10 +262,24 @@ prepare_compile_package_sets() {
   [ -s "$roots_file" ] || die "Generated compile root package list is empty"
 
   if [ -n "$all_raw" ]; then
+    local unknown_required="" pkg
+
     normalize_pkg_list_to_file "$all_raw" "$all_file"
     validate_pkg_tokens_in_file "$all_file" "PASSWALL_ALL_PACKAGES"
     [ -s "$all_file" ] || die "PASSWALL_ALL_PACKAGES resolved to empty list"
-    assert_file_subset "$required_file" "$all_file" "PASSWALL_REQUIRED_PACKAGES"
+
+    # Required list may include external/system feed packages (e.g. dnsmasq-full, kmods)
+    # that are intentionally outside PASSWALL_ALL_PACKAGES.
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] || continue
+      if ! grep -qx "$pkg" "$all_file"; then
+        unknown_required="${unknown_required}${unknown_required:+ }$pkg"
+      fi
+    done < "$required_file"
+    if [ -n "$unknown_required" ]; then
+      log_warn "PASSWALL_REQUIRED_PACKAGES includes external packages not in PASSWALL_ALL_PACKAGES: $unknown_required"
+    fi
+
     assert_file_subset "$selected_file" "$all_file" "PASSWALL_OPTIONAL_SELECTED_PACKAGES"
     assert_file_subset "$unselected_file" "$all_file" "PASSWALL_OPTIONAL_UNSELECTED_PACKAGES"
   fi

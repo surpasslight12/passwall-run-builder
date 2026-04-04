@@ -23,7 +23,7 @@ payload/install.sh           # 设备安装脚本
 核心变量位于 `config/config.conf`：
 
 - `PASSWALL_ALL_PACKAGES`：上游包全集（用于清单校验）
-- `PASSWALL_REQUIRED_PACKAGES`：必选编译组件
+- `PASSWALL_REQUIRED_PACKAGES`：必选编译组件（允许包含 OpenWrt feed/system 包）
 - `PASSWALL_OPTIONAL_SELECTED_PACKAGES`：已选可选组件（会编译）
 - `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES`：未选可选组件（默认不编译）
 
