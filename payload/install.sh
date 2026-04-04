@@ -12,10 +12,11 @@ die()      { err "$@"; exit 1; }
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [--install-mode auto|top-level|whitelist|full]
+Usage: ./install.sh [--install-mode auto|top-level|whitelist|full] [--force-reinstall]
 
 Options:
   --install-mode MODE  auto (default), top-level, whitelist, or full
+  --force-reinstall   Force reinstall payload package files (may overwrite newer installed versions)
   --help               Show this help
 
 Modes:
@@ -27,12 +28,17 @@ USAGE
 }
 
 INSTALL_MODE="${PASSWALL_INSTALL_MODE:-auto}"
+FORCE_REINSTALL="${PASSWALL_INSTALL_FORCE_REINSTALL:-0}"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --install-mode)
       INSTALL_MODE="${2:-}"
       [ -n "$INSTALL_MODE" ] || die "--install-mode requires a value"
       shift 2
+      ;;
+    --force-reinstall)
+      FORCE_REINSTALL=1
+      shift
       ;;
     --help|-h)
       usage
@@ -298,6 +304,14 @@ log "Installing $INSTALL_PLAN_LABEL: $INSTALL_PACKAGES"
 log "Using payload package manifest: $PAYLOAD_MAP_FILE"
 log "Using explicit payload APKs for selected packages"
 
+if [ "$FORCE_REINSTALL" = "1" ]; then
+  APK_ADD_FLAGS="--allow-untrusted --force-reinstall"
+  log_warn "Force reinstall enabled; payload packages may replace newer installed versions"
+else
+  APK_ADD_FLAGS="--allow-untrusted"
+  log "Force reinstall disabled; installer avoids forced overwrite of installed packages"
+fi
+
 if apk list -I luci-app-passwall 2>/dev/null | grep -q "luci-app-passwall"; then
   INSTALLED_VER=$(apk list -I luci-app-passwall 2>/dev/null | sed -E 's/.*-([0-9][^ ]*).*/\1/' | head -1)
   log "Installed version: ${INSTALLED_VER:-unknown}, new version: $pw_ver"
@@ -307,7 +321,7 @@ fi
 
 log "Installing $pw_ver..."
 # shellcheck disable=SC2086
-apk add --allow-untrusted --force-reinstall \
+apk add $APK_ADD_FLAGS \
   --repositories-file "$REPO_FILE" \
   --no-cache \
   --force-refresh \

@@ -191,11 +191,11 @@ run_install_smoke_test() {
     || die "Smoke installer did not include microsocks from INSTALL_WHITELIST"
   grep -q "Removing conflicting packages: dnsmasq dnsmasq-dhcpv6" "$install_log" \
     || die "Smoke installer did not exercise dnsmasq-full conflict removal"
-  grep -q "add --allow-untrusted --force-reinstall .*xray-core-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
+  grep -q "add --allow-untrusted .*xray-core-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing xray-core payload APK"
-  grep -q "add --allow-untrusted --force-reinstall .*hysteria-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
+  grep -q "add --allow-untrusted .*hysteria-${PASSWALL_VERSION_TAG}-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing hysteria payload APK"
-  grep -q "add --allow-untrusted --force-reinstall .*apks/microsocks-1.0.5-r1.apk" "$apk_invocations" \
+  grep -q "add --allow-untrusted .*apks/microsocks-1.0.5-r1.apk" "$apk_invocations" \
     || die "Smoke installer apk add invocation missing microsocks payload APK"
   grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations" \
     || die "Smoke installer apk del invocation missing dnsmasq conflict removal"

@@ -67,6 +67,10 @@ payload/install.sh           # 设备安装脚本
 - `whitelist`：安装白名单
 - `full`：安装 payload 全部 APK
 
+默认不会强制重装（不带 `--force-reinstall`），用于避免 payload 中旧版本覆盖设备已安装的新版本。
+
+如需强制覆盖，可显式添加：`--force-reinstall`，或设置环境变量 `PASSWALL_INSTALL_FORCE_REINSTALL=1`。
+
 设备安装示例：
 
 ```bash

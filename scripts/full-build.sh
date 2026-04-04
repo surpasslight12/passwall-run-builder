@@ -702,17 +702,28 @@ EOF
     }
 
     canonicalize_resolved_packages() {
-      local apk_file
+      local apk_file pkg_name local_pkg_file
+      declare -A fetched_pkg_set=()
+
       rm -rf "$canonical_fetch_dir"
       mkdir -p "$canonical_fetch_dir"
 
+      selected_apks=()
+      selected_apk_source=()
+
       while IFS= read -r -d '' apk_file; do
+        pkg_name=$(apk_package_name_from_file "$apk_file" || true)
+        [ -n "$pkg_name" ] || continue
+        fetched_pkg_set["$pkg_name"]=1
         register_canonical_apk "$apk_file" "fetched"
       done < <(find "$fetch_dir" -maxdepth 1 -type f -name '*.apk' -print0)
 
-      while IFS= read -r -d '' apk_file; do
-        register_canonical_apk "$apk_file" "local"
-      done < <(find "$local_repo_search_root" -type f -name '*.apk' -print0)
+      while IFS= read -r pkg_name; do
+        [ -n "$pkg_name" ] || continue
+        local_pkg_file=$(find_payload_pkg_file "$local_repo_search_root" "$pkg_name" || true)
+        [ -n "$local_pkg_file" ] || continue
+        register_canonical_apk "$local_pkg_file" "local"
+      done < <(printf '%s\n' "${!fetched_pkg_set[@]}" | LC_ALL=C sort)
     }
 
     build_local_repository
@@ -908,8 +919,6 @@ run_install_smoke_test() {
       smoke_status="dnsmasq-full conflict removal missing"
     elif ! grep -q "del dnsmasq dnsmasq-dhcpv6" "$apk_invocations"; then
       smoke_status="dnsmasq-full removal invocation missing"
-    elif ! grep -q -- '--force-reinstall' "$apk_invocations"; then
-      smoke_status="force-reinstall flag missing"
     fi
   fi
 
