@@ -1,0 +1,6 @@
+# Build artifacts
+*.run
+
+# Temporary build directories
+/build/
+/workdir/

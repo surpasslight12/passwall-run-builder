@@ -212,7 +212,16 @@ fi
 
 REPO_FILE="${TMPDIR:-/tmp}/passwall-repos.$$"
 trap 'rm -f "$REPO_FILE"' EXIT HUP INT TERM
-printf 'file://%s/%s\n' "$PWD" "$REPO_INDEX" > "$REPO_FILE"
+
+# Include system repos so shared dependencies (luci-lib-*, ucode, etc.)
+# are resolved from the device's repos at their current (usually newer)
+# versions, preventing regression to the SDK-era versions in our payload.
+# The local payload repo is appended last as a fallback for passwall-only
+# packages that don't exist in the system repos.
+for _rf in /etc/apk/repositories /etc/apk/repositories.d/*; do
+  [ -f "$_rf" ] && grep -v '^[[:space:]]*#' "$_rf" | grep -v '^[[:space:]]*$'
+done > "$REPO_FILE" 2>/dev/null || :
+printf 'file://%s/%s\n' "$PWD" "$REPO_INDEX" >> "$REPO_FILE"
 
 CONFLICTS=""
 set -- $INSTALL_PACKAGES
