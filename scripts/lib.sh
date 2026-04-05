@@ -16,15 +16,15 @@ group_end()   { printf '::endgroup::\n'; }
 
 gh_set_env() {
   export "$1=$2"
-  [ -n "${GITHUB_ENV:-}" ] && printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"
+  [ -n "${GITHUB_ENV:-}" ] && printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV" || :
 }
 
 gh_output() {
-  [ -n "${GITHUB_OUTPUT:-}" ] && printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+  [ -n "${GITHUB_OUTPUT:-}" ] && printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT" || :
 }
 
 gh_summary() {
-  [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY" || :
 }
 
 # ── Payload layout constants ─────────────────────────
@@ -53,6 +53,27 @@ require_tool() { command -v "$1" >/dev/null 2>&1 || die "Required tool not found
 
 trim_tag() { printf '%s\n' "${1#v}"; }
 
+resolve_tmpdir() {
+  local min_kb="${1:-1024}"
+  local dir probe avail_kb
+  for dir in "${TMPDIR:-}" /tmp "${HOME:-}/.tmp" "$PWD/.tmp"; do
+    [ -n "$dir" ] || continue
+    mkdir -p "$dir" 2>/dev/null || continue
+    avail_kb=$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 { print $4 }')
+    case "$avail_kb" in
+      ''|*[!0-9]*) continue ;;
+    esac
+    [ "$avail_kb" -ge "$min_kb" ] || continue
+    probe="$dir/.passwall-tmp-probe.$$"
+    if : > "$probe" 2>/dev/null; then
+      rm -f "$probe"
+      printf '%s\n' "$dir"
+      return 0
+    fi
+  done
+  return 1
+}
+
 load_config() {
   local file="$1"
   [ -f "$file" ] || die "Config not found: $file"
@@ -65,7 +86,7 @@ load_config() {
     value=${value#${value%%[![:space:]]*}}
     value=${value%${value##*[![:space:]]}}
     export "$key=$value"
-    [ -n "${GITHUB_ENV:-}" ] && printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+    [ -n "${GITHUB_ENV:-}" ] && printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV" || :
   done < <(grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=' "$file")
 }
 
@@ -98,9 +119,10 @@ resolve_remote_default_branch() {
 
 make_pkg() {
   local target="$1" label="${2:-$1}"
-  local jobs logfile
+  local jobs logfile tmp_root
   jobs=$(nproc)
-  logfile="/tmp/build-${label//\//_}-$$.log"
+  tmp_root="${TMPDIR:-/tmp}"
+  logfile="$tmp_root/build-${label//\//_}-$$.log"
 
   local -a env_args=()
   [ -n "${RUSTFLAGS:-}" ]                    && env_args+=("RUSTFLAGS=$RUSTFLAGS")

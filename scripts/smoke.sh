@@ -15,7 +15,7 @@ UPSTREAM_REPO="openwrt-passwall"
 # ── CLI state ─────────────────────────────────────────
 
 CONFIG_FILE="$REPO_ROOT/config/config.conf"
-OUTPUT_DIR="${TMPDIR:-/tmp}/passwall-smoke-output"
+OUTPUT_DIR=""
 TAG_OVERRIDE=""
 KEEP_WORKDIR=0
 
@@ -39,7 +39,7 @@ USAGE
 }
 
 cleanup() {
-  [ "$KEEP_WORKDIR" -eq 0 ] && [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ] && rm -rf "$WORKDIR"
+  [ "$KEEP_WORKDIR" -eq 0 ] && [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ] && rm -rf "$WORKDIR" || :
 }
 
 # ══════════════════════════════════════════════════════
@@ -168,7 +168,12 @@ main() {
     esac
   done
 
-  WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/passwall-smoke.XXXXXX")
+  TMPDIR=$(resolve_tmpdir 65536) || die "No temp directory with enough free space available"
+  export TMPDIR
+  export TMP="$TMPDIR" TEMP="$TMPDIR"
+  [ -n "$OUTPUT_DIR" ] || OUTPUT_DIR="$TMPDIR/passwall-smoke-output"
+
+  WORKDIR=$(mktemp -d "$TMPDIR/passwall-smoke.XXXXXX")
   trap cleanup EXIT
 
   cd "$REPO_ROOT"

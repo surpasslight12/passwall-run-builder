@@ -57,7 +57,7 @@ USAGE
 }
 
 cleanup() {
-  [ "$KEEP_WORKDIR" -eq 0 ] && [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ] && rm -rf "$WORKDIR"
+  [ "$KEEP_WORKDIR" -eq 0 ] && [ -n "${WORKDIR:-}" ] && [ -d "$WORKDIR" ] && rm -rf "$WORKDIR" || :
 }
 
 # ══════════════════════════════════════════════════════
@@ -66,7 +66,10 @@ cleanup() {
 
 phase_setup() {
   log_info "=== Setup ==="
-  WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/passwall-build.XXXXXX")
+  TMPDIR=$(resolve_tmpdir 10485760) || die "No temp directory with at least 10GB free space available"
+  export TMPDIR
+  export TMP="$TMPDIR" TEMP="$TMPDIR"
+  WORKDIR=$(mktemp -d "$TMPDIR/passwall-build.XXXXXX")
   SDK="$WORKDIR/sdk"
   PAYLOAD="$WORKDIR/payload"
   mkdir -p "$OUTPUT_DIR" "$PAYLOAD" "$SDK"
@@ -217,8 +220,10 @@ patch_go_host_bootstrap() {
 
   local gl_ver="feeds/packages/lang/golang/golang-version.mk"
   if [ -f "$gl_ver" ] && ! grep -qF 'TITLE:=Go programming language' "$gl_ver"; then
+    local gv_tmp
+    gv_tmp=$(mktemp "${TMPDIR:-/tmp}/gv-patched.XXXXXX")
     awk '/^define Package\/\$\(PKG_NAME\)\/Default/ { print; print "  TITLE:=Go programming language"; next } { print }' \
-      "$gl_ver" > /tmp/gv-patched.mk && mv /tmp/gv-patched.mk "$gl_ver"
+      "$gl_ver" > "$gv_tmp" && mv "$gv_tmp" "$gl_ver"
   fi
 
   local sys_go; sys_go=$(command -v go 2>/dev/null || true)
@@ -345,10 +350,10 @@ phase_config_gen() {
     {
       printf 'CONFIG_PACKAGE_luci-app-passwall=m\nCONFIG_PACKAGE_luci-i18n-passwall-zh-cn=m\n'
       while IFS= read -r pkg; do
-        [ -n "$pkg" ] && printf 'CONFIG_PACKAGE_%s=m\n' "$pkg"
+        [ -n "$pkg" ] && printf 'CONFIG_PACKAGE_%s=m\n' "$pkg" || :
       done < "$roots"
       while IFS= read -r pkg; do
-        [ -n "$pkg" ] && printf '# CONFIG_PACKAGE_%s is not set\n' "$pkg"
+        [ -n "$pkg" ] && printf '# CONFIG_PACKAGE_%s is not set\n' "$pkg" || :
       done < "$unselected"
     } > .config
     make defconfig </dev/null
@@ -389,15 +394,30 @@ phase_compile() {
         case "$pkg" in kmod-*) [ -d package/kernel/linux ] && dir="package/kernel/linux" ;; esac
       fi
       if [ -z "$dir" ]; then
-        mk=$(grep -RslF --include='Makefile' "define Package/${pkg}" feeds package 2>/dev/null | LC_ALL=C sort | head -1 || true)
-        [ -z "$mk" ] && mk=$(grep -RslF --include='Makefile' "PKG_NAME:=${pkg}" feeds package 2>/dev/null | LC_ALL=C sort | head -1 || true)
+        # Prefer package/feeds/ symlinks (valid make targets) over raw feeds/ paths
+        local feed_link
+        for feed_link in package/feeds/*/"$pkg"; do
+          [ -d "$feed_link" ] && { dir="$feed_link"; break; }
+        done
+      fi
+      if [ -z "$dir" ]; then
+        mk=$(grep -RslF --include='Makefile' "define Package/${pkg}" package 2>/dev/null | LC_ALL=C sort | head -1 || true)
+        [ -z "$mk" ] && mk=$(grep -RslF --include='Makefile' "PKG_NAME:=${pkg}" package 2>/dev/null | LC_ALL=C sort | head -1 || true)
+        [ -z "$mk" ] && mk=$(grep -RslF --include='Makefile' "define Package/${pkg}" feeds 2>/dev/null | LC_ALL=C sort | head -1 || true)
+        [ -z "$mk" ] && mk=$(grep -RslF --include='Makefile' "PKG_NAME:=${pkg}" feeds 2>/dev/null | LC_ALL=C sort | head -1 || true)
         [ -n "$mk" ] && dir="$(dirname "$mk")" || die "Cannot find source for: $pkg"
       fi
       src_dirs["$dir"]=1
     done < "$roots"
-    src_dirs["package/passwall-luci/luci-app-passwall"]=1
-    printf '%s\n' "${!src_dirs[@]}" | LC_ALL=C sort
-  ) > "$src_list"
+      src_dirs["package/passwall-luci/luci-app-passwall"]=1
+
+      # Build kernel packaging first so feed packages that consume kmods
+      # (notably dnsmasq-full/nftables in this config) see staged kernel APKs.
+      if [ -n "${src_dirs["package/kernel/linux"]+x}" ]; then
+        printf '%s\n' "package/kernel/linux"
+      fi
+      printf '%s\n' "${!src_dirs[@]}" | LC_ALL=C sort | awk '$0 != "package/kernel/linux"'
+    ) > "$src_list"
 
   # Compile all sources
   (
@@ -435,7 +455,7 @@ phase_compile() {
   if [ -s "$timings" ]; then
     summary+="### Durations"$'\n'"| Package | Status | Time |"$'\n'"| --- | --- | --- |"$'\n'
     while IFS='|' read -r p s t; do
-      [ -n "$p" ] && summary+="| $p | $s | $t |"$'\n'
+      [ -n "$p" ] && summary+="| $p | $s | $t |"$'\n' || :
     done < "$timings"
   fi
   gh_summary "$summary"
@@ -471,7 +491,7 @@ phase_payload() {
     local -a specs=()
 
     # ── Stage 1: Build local APK index ──
-    local mkndx_log="/tmp/pkg-index-$$.log"
+    local mkndx_log="${TMPDIR:-/tmp}/pkg-index-$$.log"
     find "$local_repo" -type f -name 'packages.adb' -delete 2>/dev/null || true
     make package/index V=s >"$mkndx_log" 2>&1 || { tail -60 "$mkndx_log"; die "Local APK index failed"; }
     rm -f "$mkndx_log"
