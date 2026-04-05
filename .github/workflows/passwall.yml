@@ -41,17 +41,12 @@ jobs:
       - name: Load centralized config
         id: config
         run: |
-          source scripts/build-lib.sh
-          load_env_config config/config.conf
+          source scripts/lib.sh
+          load_config config/config.conf
 
-          required_vars=(OPENWRT_SDK_URL)
-          for key in "${required_vars[@]}"; do
-            [ -n "${!key:-}" ] || die "Missing required config key: $key"
-          done
+          [ -n "${OPENWRT_SDK_URL:-}" ] || die "Missing required config key: OPENWRT_SDK_URL"
 
-          {
-            printf 'config_path=%s\n' 'config/config.conf'
-          } >> "$GITHUB_OUTPUT"
+          printf 'config_path=%s\n' 'config/config.conf' >> "$GITHUB_OUTPUT"
 
   prepare-build:
     needs:
@@ -180,8 +175,8 @@ jobs:
 
       - name: Setup environment
         run: |
-          source scripts/build-lib.sh
-          step_start "Setup environment"
+          source scripts/lib.sh
+          log_info "=== Setup environment ==="
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
@@ -189,7 +184,6 @@ jobs:
             libssl-dev wget python3 git ca-certificates makeself zstd \
             curl \
             || die "apt-get install failed"
-          step_end
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -200,8 +194,8 @@ jobs:
 
       - name: Install toolchains
         run: |
-          source scripts/build-lib.sh
-          step_start "Install toolchains"
+          source scripts/lib.sh
+          log_info "=== Install toolchains ==="
 
           GO_VER="$GO_VERSION"
           GO_ACTUAL=$(go version | awk '{print $3}' | sed 's/go//')
@@ -222,14 +216,11 @@ jobs:
           [ "$RUST_ACTUAL" = "$RUST_VER" ] || die "Rust verification failed: expected $RUST_VER, got $RUST_ACTUAL"
           cargo --version || die "Cargo verification failed"
 
-          step_end
-
       - name: Build installer
         id: installer
         run: |
-          chmod +x scripts/local-build.sh
-          ./scripts/local-build.sh \
-            --mode full \
+          chmod +x scripts/build.sh
+          ./scripts/build.sh \
             --config "$GITHUB_WORKSPACE/${{ needs.load-config.outputs.config_path }}" \
             --output-dir "$GITHUB_WORKSPACE" \
             --tag "${{ needs.prepare-build.outputs.build_tag }}"
@@ -243,36 +234,22 @@ jobs:
       - name: Diagnostics
         if: always()
         run: |
-          source scripts/build-lib.sh
+          source scripts/lib.sh
           GO_VER=$(go version 2>/dev/null || echo N/A)
           RUST_VER=$(rustc --version 2>/dev/null || echo N/A)
           DISK_AVAIL=$(df -h / --output=avail | tail -1 | tr -d ' ')
-          INSTALLER_INFO=""
-          if [ -n "${RUN_NAME:-}" ] && [ -f "${RUN_NAME}" ]; then
-            INSTALLER_INFO="${RUN_NAME} ($(du -h "${RUN_NAME}" | cut -f1))"
-          fi
-          log_info "Go: $GO_VER"
-          log_info "Rust: $RUST_VER"
-          log_info "Disk: $DISK_AVAIL"
+          log_info "Go: $GO_VER | Rust: $RUST_VER | Disk: $DISK_AVAIL"
           log_info "SDK: ${OPENWRT_SDK_URL:-not set}"
-          log_info "PassWall tag: ${PASSWALL_VERSION_TAG_RAW:-not set}"
-          log_info "Build reason: ${{ needs.prepare-build.outputs.reason }}"
-          if [ -n "$INSTALLER_INFO" ]; then
-            log_info "Installer: $INSTALLER_INFO"
-          else
-            log_warn "Installer: not built"
-          fi
+          log_info "Tag: ${PASSWALL_VERSION_TAG_RAW:-not set}"
+          log_info "Reason: ${{ needs.prepare-build.outputs.reason }}"
           {
             echo "### Build Info"
             echo "- Go: $GO_VER"
             echo "- Rust: $RUST_VER"
             echo "- Disk: $DISK_AVAIL"
             echo "- SDK: \`${OPENWRT_SDK_URL:-not set}\`"
-            echo "- PassWall tag: \`${PASSWALL_VERSION_TAG_RAW:-not set}\`"
-            echo "- Build reason: ${{ needs.prepare-build.outputs.reason }}"
-            [ -n "$INSTALLER_INFO" ] \
-              && echo "- Installer: $INSTALLER_INFO" \
-              || echo "- Installer: not built"
+            echo "- Tag: \`${PASSWALL_VERSION_TAG_RAW:-not set}\`"
+            echo "- Reason: ${{ needs.prepare-build.outputs.reason }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
   release:

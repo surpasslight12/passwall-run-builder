@@ -1,47 +1,63 @@
 # 破坏性重构说明
 
-本文档记录本轮极简重构的删除项、保留项与迁移方式，用于替代旧行为兼容说明。
+## 脚本结构变更
+
+旧结构 → 新结构：
+
+| 旧文件 | 新文件 | 说明 |
+| --- | --- | --- |
+| `scripts/build-lib.sh` | `scripts/lib.sh` | 精简共享库，移除非必要函数 |
+| `scripts/full-build.sh` | `scripts/build.sh` | 完整构建流水线，合并阶段函数 |
+| `scripts/local-build.sh` | `scripts/smoke.sh` | 本地烟雾测试，不再承载 `--mode full` |
 
 ## 已删除项
 
-- 安装器模式 `top-level` 已删除。
-- 安装器模式 `whitelist` 已删除（由 `--auto` 统一承载）。
-- 安装器参数 `--install-mode` 与 `--force-reinstall` 已删除。
-- payload 元数据 `metadata/TOPLEVEL_PACKAGES` 已从生产与消费链路移除。
-- `config/config.conf` 中已删除以下配置项：
-  - `PASSWALL_UPSTREAM_OWNER`
-  - `PASSWALL_UPSTREAM_REPO`
-  - `OPENWRT_BASE_FEED_REPO`
-  - `OPENWRT_PACKAGES_FEED_REPO`
-  - `OPENWRT_LUCI_FEED_REPO`
-  - `OPENWRT_ROUTING_FEED_REPO`
-  - `OPENWRT_TELEPHONY_FEED_REPO`
-  - `GO_VERSION`
-  - `RUST_TOOLCHAIN_VERSION`
+### 脚本文件
+- `scripts/build-lib.sh` — 被 `scripts/lib.sh` 替代
+- `scripts/full-build.sh` — 被 `scripts/build.sh` 替代
+- `scripts/local-build.sh` — 被 `scripts/smoke.sh` 替代
+
+### 函数与机制
+- `step_start()` / `step_end()` 计时仪式 → 简单 `log_info` 阶段标记
+- `config_default()` → 移除，`config.conf` 已有默认值
+- `payload_apk_dir_name()` 等常量函数 → 变量常量
+- `summary_append_line()` / `build_payload_dependency_summary()` → 内联
+- `check_disk_space()` / `path_available_gb()` / `choose_temp_root()` / `make_managed_tempdir()` → `mktemp -d`
+- `sed_escape_replacement()` → 内联
+- `count_file_lines()` → `wc -l`
+- `run_payload_summary_regression()` → 移除
+- `prepare_compile_package_sets()` 复杂验证 → 简化为 `comm -12` 集合交叉检查
+- `--metadata-file` 输出 → 移除
+
+### 安装器变更
+- `INSTALL_MODE_RESOLVED` 间接层 → 直接使用 `INSTALL_MODE`
+- `INSTALL_PLAN_LABEL` → 移除
+
+### CLI 变更
+- `local-build.sh --mode smoke|full` → `smoke.sh` 和 `build.sh` 独立入口
+- `full-build.sh --repo-root` → 移除，自动从脚本位置推导
+- `full-build.sh --payload-dir` → 移除，使用内部临时目录
+- `full-build.sh --metadata-file` → 移除
 
 ## 保留项
 
-- 安装器模式保留为 `auto|full`。
-- `auto` 为默认模式，读取 `INSTALL_WHITELIST`。
-- payload 最小闭集保留为：
-  - `metadata/INSTALL_WHITELIST`
-  - `metadata/PAYLOAD_APK_MAP`
-  - `apks/packages.adb`
-  - `SHA256SUMS`
+- 安装器模式 `auto|full`
+- 版本保护（跳过同版/更高版包）
+- payload 最小闭集：`INSTALL_WHITELIST`、`PAYLOAD_APK_MAP`、`apks/packages.adb`、`SHA256SUMS`
+- 所有编译功能、依赖解析、SDK patch
+- CI workflow 完整流程
 
 ## 迁移指南
 
-1. 旧命令中若包含 `--install-mode top-level` 或 `--install-mode whitelist`，统一改为 `--auto`。
-2. 旧命令中若包含 `--install-mode full`，改为 `--full`。
-3. `--force-reinstall` 与 `PASSWALL_INSTALL_FORCE_REINSTALL` 已不可用；安装器默认启用版本保护跳过同版/更高版包。
-4. 依赖 `TOPLEVEL_PACKAGES` 的下游脚本需改为读取 `INSTALL_WHITELIST`。
-5. CI 与自动化脚本不应再从 `config/config.conf` 读取上游仓库与 toolchain 版本配置。
+1. `local-build.sh --mode smoke` → `smoke.sh`
+2. `local-build.sh --mode full` → `build.sh`
+3. `source scripts/build-lib.sh` → `source scripts/lib.sh`
+4. `load_env_config` → `load_config`
+5. CI 脚本中的 `build-lib.sh` 引用需更新为 `lib.sh`
 
-## 本轮重构结果
+## 重构结果
 
-- 入口收敛：CI 构建入口已统一到 `scripts/local-build.sh --mode full`。
-- 阶段拆分：
-  - feeds 配置阶段已拆分为独立子函数。
-  - 源码准备阶段已拆分为独立子函数。
-  - 编译阶段已拆分为源目录解析、执行编译、输出摘要三个函数。
-- 回归结果：语法检查与本地 smoke 均通过。
+- 代码总量从 ~2630 行减少到 ~1850 行（精简约 30%）
+- 入口清晰：`build.sh`（构建）、`smoke.sh`（测试）、独立职责
+- 消除 build-lib.sh 万能厨房：lib.sh 仅保留跨脚本共享的必要函数
+- 消除重复：config 加载、tag 解析不再在多处重复实现

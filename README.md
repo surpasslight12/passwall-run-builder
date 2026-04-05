@@ -2,78 +2,58 @@
 
 基于 OpenWrt SDK 编译 PassWall 组件并打包为 `.run` 安装器，支持 GitHub Actions 与本地构建。
 
-## 破坏性变更说明
-
-- 编译清单不再由 luci Makefile 动态推导，改为静态分组驱动。
-- 只会编译：PassWall 本体 + 必选组件 + 已选可选组件。
-- `shadowsocks-libev` / `shadowsocks-rust` / `v2ray-plugin` 默认移入未选列表，按需启用。
-
-详细删减清单与迁移说明见 [docs/breaking-changes.md](docs/breaking-changes.md)。
-
 ## 目录结构
 
 ```text
 config/config.conf           # 构建配置
-scripts/build-lib.sh         # 公共函数库
-scripts/full-build.sh        # 完整构建入口（CI/本地共用）
-scripts/local-build.sh       # 本地 smoke/full 入口
+scripts/lib.sh               # 公共函数库
+scripts/build.sh             # 完整构建入口（CI/本地共用）
+scripts/smoke.sh             # 本地烟雾测试入口
 payload/install.sh           # 设备安装脚本
 ```
 
-## 配置模型
+## 配置
 
 核心变量位于 `config/config.conf`：
 
 - `OPENWRT_SDK_URL`：OpenWrt SDK 地址
 - `OPENWRT_SOURCE_CDN_URL` / `OPENWRT_SOURCE_MIRROR_URL` / `GOPROXY`：可选下载加速参数
-- `PASSWALL_ALL_PACKAGES`：上游包全集（用于清单校验）
+- `PASSWALL_ALL_PACKAGES`：上游包全集（用于校验）
 - `PASSWALL_REQUIRED_PACKAGES`：必选编译组件（允许包含 OpenWrt feed/system 包）
 - `PASSWALL_OPTIONAL_SELECTED_PACKAGES`：已选可选组件（会编译）
 - `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES`：未选可选组件（默认不编译）
 
-说明：PassWall 上游仓库与 OpenWrt feed 源已在脚本内固定，不再作为配置项暴露。
+PassWall 上游仓库与 OpenWrt feed 源已在脚本内固定，不再作为配置项。
 
-启用未选组件方法：把组件从 `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` 移到 `PASSWALL_OPTIONAL_SELECTED_PACKAGES`。
+启用未选组件：把组件从 `PASSWALL_OPTIONAL_UNSELECTED_PACKAGES` 移到 `PASSWALL_OPTIONAL_SELECTED_PACKAGES`。
 
 ## 构建方式
 
 ### GitHub Actions
 
-- 手动触发 `.github/workflows/passwall.yml`
-- 输入 `mode=build`（或 `sync-and-build`）
-- 可选输入 `tag`
+手动触发 `.github/workflows/passwall.yml`，输入 `mode=build`（或 `sync-and-build`），可选输入 `tag`。
 
-### 本地 smoke
+### 本地烟雾测试
 
 ```bash
-./scripts/local-build.sh --mode smoke --tag 26.4.1-1
+./scripts/smoke.sh --tag 26.4.1-1
 ```
 
-### 本地 full
+### 本地完整构建
 
 ```bash
-./scripts/local-build.sh --mode full \
-  --sdk-root /path/to/openwrt-sdk \
-  --tag 26.4.1-1
-```
-
-也可直接调用：
-
-```bash
-./scripts/full-build.sh \
+./scripts/build.sh \
   --output-dir /path/to/out \
   --sdk-root /path/to/openwrt-sdk \
   --tag 26.4.1-1
 ```
 
-## 安装器模式
+## 安装器
 
-- `auto`：安装白名单（默认）
-- `full`：安装 payload 全部 APK
+- `--auto`：安装白名单包（默认）
+- `--full`：安装 payload 全部 APK
 
-安装器默认启用版本保护：当设备已安装同版本或更高版本时，跳过 payload 中对应包，避免旧版本覆盖新版本。
-
-设备安装示例：
+安装器默认启用版本保护：跳过设备上已有同版本或更高版本的包。
 
 ```bash
 scp passwall_*.run root@openwrt:/tmp/
@@ -93,20 +73,6 @@ payload/
   metadata/PAYLOAD_APK_MAP
   SHA256SUMS
 ```
-
-payload 组装流程（`scripts/full-build.sh`）分为以下阶段：
-
-- 构建本地 APK 索引（`make package/index` + 收集 `packages.adb`）
-- 生成请求根集合（本体 + 必选 + 已选可选 + `dnsmasq-full` 约束）
-- 联合本地/官方仓库做递归依赖解析
-- 对解析结果做本地优先规范化，生成 `INSTALL_WHITELIST`
-- 落盘 APK、生成 `PAYLOAD_APK_MAP`、`apks/packages.adb` 与 `SHA256SUMS`
-
-重构边界：
-
-- 本仓库允许破坏性演进，优先简化实现与维护成本
-- 安装器不再支持 `top-level` 模式
-- payload 元数据最小闭集为 `INSTALL_WHITELIST`、`PAYLOAD_APK_MAP`、`apks/packages.adb`、`SHA256SUMS`
 
 ## License
 
